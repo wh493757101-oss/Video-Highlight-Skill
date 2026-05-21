@@ -1,0 +1,7 @@
+id: case_001
+category: 体育
+difficulty: easy
+description: "足球比赛 — 进球集锦"
+source: local
+expected_segments: 0
+expected_total_duration: 60.0
