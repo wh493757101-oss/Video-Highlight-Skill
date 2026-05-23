@@ -8,6 +8,7 @@ import pytest
 import subprocess
 
 from src.video_fetcher import (
+    ArkFileSource,
     LocalFileSource,
     TosSource,
     UrlSource,
@@ -240,3 +241,36 @@ class TestVideoFetcher:
         y, sr = fetcher.load_audio("/tmp/bad.wav")
         assert len(y) == 0
         assert sr == 22050
+
+
+class TestArkFileSource:
+    def test_resolve_success(self, mocker, tmp_path):
+        video = tmp_path / "test.mp4"
+        video.write_bytes(b"fake mp4 content")
+
+        mock_client = mocker.MagicMock()
+        mock_client.upload_file.return_value = {"download_url": "https://ark-cn-beijing.volces.com/dl/test_video"}
+        mocker.patch("src.ark_client.ArkClient", return_value=mock_client)
+
+        source = ArkFileSource(str(video))
+        result = source.resolve()
+
+        assert result == "https://ark-cn-beijing.volces.com/dl/test_video"
+        mock_client.upload_file.assert_called_once()
+
+    def test_resolve_file_not_found(self):
+        source = ArkFileSource("/nonexistent/video.mp4")
+        with pytest.raises(FileNotFoundError, match="视频文件不存在"):
+            source.resolve()
+
+    def test_resolve_no_download_url(self, mocker, tmp_path):
+        video = tmp_path / "test.mp4"
+        video.write_bytes(b"fake mp4 content")
+
+        mock_client = mocker.MagicMock()
+        mock_client.upload_file.return_value = {"id": "file-123"}
+        mocker.patch("src.ark_client.ArkClient", return_value=mock_client)
+
+        source = ArkFileSource(str(video))
+        with pytest.raises(RuntimeError, match="未返回 download_url"):
+            source.resolve()

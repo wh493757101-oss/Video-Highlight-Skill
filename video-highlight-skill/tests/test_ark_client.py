@@ -124,3 +124,77 @@ class TestArkClient:
         response = {"choices": [{"message": {"content": {"key": "value"}}}]}
         result = client.extract_json(response)
         assert result == {"key": "value", "_usage": {}}
+
+
+class TestArkClientUploadFile:
+    def test_upload_success(self, mocker, tmp_path):
+        video = tmp_path / "test.mp4"
+        video.write_bytes(b"fake video content")
+
+        mock_resp = mocker.MagicMock()
+        mock_resp.json.return_value = {"download_url": "https://ark-cn-beijing.volces.com/dl/abc123"}
+        mock_resp.raise_for_status = mocker.MagicMock()
+        mock_post = mocker.patch("httpx.post", return_value=mock_resp)
+
+        client = ArkClient(ArkConfig(api_key="test-key"))
+        result = client.upload_file(str(video))
+
+        assert result["download_url"] == "https://ark-cn-beijing.volces.com/dl/abc123"
+        mock_post.assert_called_once()
+
+    def test_upload_file_not_found(self):
+        client = ArkClient(ArkConfig(api_key="test-key"))
+        with pytest.raises(FileNotFoundError, match="文件不存在"):
+            client.upload_file("/nonexistent/video.mp4")
+
+    def test_upload_empty_file(self, tmp_path):
+        video = tmp_path / "empty.mp4"
+        video.write_text("")
+
+        client = ArkClient(ArkConfig(api_key="test-key"))
+        with pytest.raises(ValueError, match="文件为空"):
+            client.upload_file(str(video))
+
+    def test_upload_retry_on_429(self, mocker, tmp_path):
+        import httpx
+
+        video = tmp_path / "test.mp4"
+        video.write_bytes(b"fake video content")
+
+        mock_429_resp = mocker.MagicMock()
+        mock_429_resp.status_code = 429
+        mock_429_resp.text = "rate limited"
+        mock_429_err = httpx.HTTPStatusError(
+            "rate limited", request=mocker.MagicMock(), response=mock_429_resp
+        )
+
+        mock_ok = mocker.MagicMock()
+        mock_ok.json.return_value = {"download_url": "https://ark-cn-beijing.volces.com/dl/retry_ok"}
+        mock_ok.raise_for_status = mocker.MagicMock()
+
+        mock_post = mocker.patch("httpx.post", side_effect=[mock_429_err, mock_ok])
+        mocker.patch("time.sleep")
+
+        client = ArkClient(ArkConfig(api_key="test-key"))
+        result = client.upload_file(str(video))
+
+        assert result["download_url"] == "https://ark-cn-beijing.volces.com/dl/retry_ok"
+        assert mock_post.call_count == 2
+
+    def test_upload_http_error_raises(self, mocker, tmp_path):
+        import httpx
+
+        video = tmp_path / "test.mp4"
+        video.write_bytes(b"fake video content")
+
+        mock_resp = mocker.MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.text = "internal error"
+        mock_err = httpx.HTTPStatusError(
+            "internal error", request=mocker.MagicMock(), response=mock_resp
+        )
+        mocker.patch("httpx.post", side_effect=mock_err)
+
+        client = ArkClient(ArkConfig(api_key="test-key"))
+        with pytest.raises(RuntimeError, match="文件上传失败"):
+            client.upload_file(str(video))

@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -9,6 +10,8 @@ from typing import Any
 
 import httpx
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -126,3 +129,44 @@ class ArkClient:
             result = {}
         result["_usage"] = usage
         return result
+
+    def upload_file(self, file_path: str) -> dict[str, Any]:
+        """上传文件到 Ark Files API，返回包含 download_url 的 file object。
+
+        Files API 文档: https://www.volcengine.com/docs/82379/1870405
+        返回的 download_url 为 HTTPS 预签名链接，24 小时有效。
+        """
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"文件不存在: {file_path}，请检查文件路径后重试")
+        if path.stat().st_size == 0:
+            raise ValueError(f"文件为空（0 字节）: {file_path}，请检查文件后重试")
+
+        with open(file_path, "rb") as f:
+            last_error: str | None = None
+            for attempt in range(self.config.max_retries):
+                try:
+                    resp = httpx.post(
+                        f"{self.config.base_url}/files",
+                        headers={"Authorization": f"Bearer {self.config.api_key}"},
+                        files={"file": (path.name, f, "application/octet-stream")},
+                        timeout=self.config.timeout,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()
+                except httpx.HTTPStatusError as e:
+                    last_error = f"HTTP {e.response.status_code}: {e.response.text}"
+                    if e.response.status_code == 429:
+                        time.sleep(min(2 ** attempt, 30))
+                        continue
+                    raise RuntimeError(f"文件上传失败，请稍后重试: {last_error}") from e
+                except httpx.RequestError as e:
+                    last_error = str(e)
+                    if attempt < self.config.max_retries - 1:
+                        time.sleep(1)
+                        continue
+                    raise RuntimeError(f"文件上传失败，请稍后重试: {last_error}") from e
+
+        raise RuntimeError(
+            f"文件上传失败（已重试 {self.config.max_retries} 次），请稍后重试: {last_error}"
+        )

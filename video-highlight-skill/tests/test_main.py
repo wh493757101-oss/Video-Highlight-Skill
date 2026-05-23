@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from src.highlight_detector import DetectionResult
-from src.main import PipelineConfig, PipelineResult, VideoHighlightPipeline
+from src.main import DegradationRecord, PipelineConfig, PipelineResult, VideoHighlightPipeline
 from src.rule_engine import HighlightSegment
 from src.video_editor import EditResult
 from src.video_fetcher import LocalFileSource, UrlSource, VideoMetadata
@@ -237,6 +237,57 @@ class TestVideoHighlightPipeline:
         assert "#2: 8.0s - 12.0s" in formatted
         assert "las" in formatted
 
+    def test_format_result_with_degradations(self, tmp_path):
+        metadata = VideoMetadata(
+            path=str(tmp_path / "video.mp4"),
+            duration=15.0,
+            fps=30.0,
+            width=1920,
+            height=1080,
+        )
+        detection = DetectionResult(
+            segments=[HighlightSegment(start_time=2.0, end_time=5.0, combined_score=0.9)],
+            source="rule",
+            degraded=True,
+            degradation_reason="Ark API 超时",
+        )
+        edit = EditResult(
+            output_path=str(tmp_path / "highlight_reel.mp4"),
+            source="ffmpeg",
+            degraded=True,
+            degradation_reason="LAS 不可用",
+        )
+        result = PipelineResult(
+            metadata=metadata,
+            detection=detection,
+            edit=edit,
+            degradations=[
+                DegradationRecord(
+                    stage="高光检测",
+                    from_path="Ark 多模态 API",
+                    to_path="规则引擎（librosa + OpenCV）",
+                    reason="Ark API 超时",
+                ),
+                DegradationRecord(
+                    stage="视频剪辑",
+                    from_path="LAS las_video_edit 云端算子",
+                    to_path="FFmpeg 本地剪辑",
+                    reason="LAS 不可用",
+                ),
+            ],
+        )
+
+        pipeline = VideoHighlightPipeline()
+        formatted = pipeline.format_result(result)
+
+        assert "[降级说明]" in formatted
+        assert "Ark 多模态 API" in formatted
+        assert "规则引擎" in formatted
+        assert "LAS las_video_edit" in formatted
+        assert "FFmpeg" in formatted
+        assert "Ark API 超时" in formatted
+        assert "LAS 不可用" in formatted
+
     def test_format_result_with_error(self, tmp_path):
         metadata = VideoMetadata(
             path=str(tmp_path / "video.mp4"),
@@ -286,6 +337,57 @@ class TestVideoHighlightPipeline:
         assert len(data["detection"]["segments"]) == 1
         assert data["detection"]["segments"][0]["score"] == 0.9
         assert data["edit"]["source"] == "las"
+
+    def test_export_json_with_degradations(self, tmp_path):
+        metadata = VideoMetadata(
+            path=str(tmp_path / "video.mp4"),
+            duration=10.0,
+            fps=30.0,
+            width=1920,
+            height=1080,
+        )
+        detection = DetectionResult(
+            segments=[HighlightSegment(start_time=1.0, end_time=3.0, combined_score=0.9)],
+            source="rule",
+            degraded=True,
+            degradation_reason="Ark API 超时",
+        )
+        edit = EditResult(
+            output_path=str(tmp_path / "out.mp4"),
+            source="ffmpeg",
+            degraded=True,
+            degradation_reason="LAS 不可用",
+        )
+        result = PipelineResult(
+            metadata=metadata,
+            detection=detection,
+            edit=edit,
+            degradations=[
+                DegradationRecord(
+                    stage="高光检测",
+                    from_path="Ark 多模态 API",
+                    to_path="规则引擎（librosa + OpenCV）",
+                    reason="Ark API 超时",
+                ),
+                DegradationRecord(
+                    stage="视频剪辑",
+                    from_path="LAS las_video_edit 云端算子",
+                    to_path="FFmpeg 本地剪辑",
+                    reason="LAS 不可用",
+                ),
+            ],
+        )
+
+        pipeline = VideoHighlightPipeline()
+        exported = pipeline.export_json(result)
+        data = json.loads(exported)
+
+        assert "degradations" in data
+        assert len(data["degradations"]) == 2
+        assert data["degradations"][0]["stage"] == "高光检测"
+        assert data["degradations"][0]["reason"] == "Ark API 超时"
+        assert data["degradations"][1]["stage"] == "视频剪辑"
+        assert data["degradations"][1]["reason"] == "LAS 不可用"
 
     def test_export_json_with_error(self, tmp_path):
         metadata = VideoMetadata(

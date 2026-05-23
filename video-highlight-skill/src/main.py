@@ -26,12 +26,21 @@ class PipelineConfig:
 
 
 @dataclass
+class DegradationRecord:
+    stage: str
+    from_path: str
+    to_path: str
+    reason: str
+
+
+@dataclass
 class PipelineResult:
     metadata: VideoMetadata
     detection: DetectionResult
     edit: EditResult | None = None
     error: str | None = None
     session_dir: str = ""
+    degradations: list[DegradationRecord] = field(default_factory=list)
 
 
 class VideoHighlightPipeline:
@@ -92,6 +101,8 @@ class VideoHighlightPipeline:
         asr_text: str = "",
         skip_edit: bool = False,
     ) -> PipelineResult:
+        degradations: list[DegradationRecord] = []
+
         metadata = self.fetcher.fetch(source)
         logger.info("视频预处理完成: duration=%.1fs, fps=%.1f", metadata.duration, metadata.fps)
 
@@ -103,29 +114,46 @@ class VideoHighlightPipeline:
             detection.source,
             len(detection.segments),
         )
+        if detection.degraded:
+            degradations.append(DegradationRecord(
+                stage="高光检测",
+                from_path="Ark 多模态 API",
+                to_path="规则引擎（librosa + OpenCV）",
+                reason=detection.degradation_reason or "Ark API 不可用或调用失败",
+            ))
 
         if not detection.segments:
             return PipelineResult(
                 metadata=metadata, detection=detection,
                 error="未检测到高光片段", session_dir=session_dir,
+                degradations=degradations,
             )
 
         if skip_edit:
             return PipelineResult(
                 metadata=metadata, detection=detection, session_dir=session_dir,
+                degradations=degradations,
             )
 
         self.config.editor.output_dir = session_dir
         edit = self.editor.edit(metadata.path, detection.segments, description)
         logger.info("剪辑完成: source=%s, output=%s", edit.source, edit.output_path)
+        if edit.degraded:
+            degradations.append(DegradationRecord(
+                stage="视频剪辑",
+                from_path="LAS las_video_edit 云端算子",
+                to_path="FFmpeg 本地剪辑",
+                reason=edit.degradation_reason or "LAS API 不可用或调用失败",
+            ))
 
         json_path = Path(session_dir) / "result.json"
         json_path.write_text(self.export_json(
-            PipelineResult(metadata=metadata, detection=detection, edit=edit)
+            PipelineResult(metadata=metadata, detection=detection, edit=edit, degradations=degradations)
         ), encoding="utf-8")
 
         return PipelineResult(
             metadata=metadata, detection=detection, edit=edit, session_dir=session_dir,
+            degradations=degradations,
         )
 
     def run_from_path(
@@ -177,6 +205,12 @@ class VideoHighlightPipeline:
             lines.append(f"  剪辑方式: {result.edit.source}")
             lines.append(f"  输出路径: {result.edit.output_path}")
 
+        if result.degradations:
+            lines.append("\n[降级说明]")
+            for d in result.degradations:
+                lines.append(f"  {d.stage}: {d.from_path} → {d.to_path}")
+                lines.append(f"    原因: {d.reason}")
+
         if result.error:
             lines.append(f"\n[警告] {result.error}")
 
@@ -212,6 +246,17 @@ class VideoHighlightPipeline:
                 "source": result.edit.source,
                 "output_path": result.edit.output_path,
             }
+
+        if result.degradations:
+            output["degradations"] = [
+                {
+                    "stage": d.stage,
+                    "from": d.from_path,
+                    "to": d.to_path,
+                    "reason": d.reason,
+                }
+                for d in result.degradations
+            ]
 
         if result.error:
             output["error"] = result.error

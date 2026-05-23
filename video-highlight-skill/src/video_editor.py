@@ -25,6 +25,8 @@ class EditResult:
     output_path: str
     segments: list[dict[str, Any]] = field(default_factory=list)
     source: str = "ffmpeg"
+    degraded: bool = False
+    degradation_reason: str = ""
 
 
 class VideoEditor:
@@ -55,7 +57,10 @@ class VideoEditor:
             if not self.config.fallback_enabled:
                 raise
             try:
-                return self._edit_with_ffmpeg(video_path, segments)
+                result = self._edit_with_ffmpeg(video_path, segments)
+                result.degraded = True
+                result.degradation_reason = f"LAS las_video_edit 云端算子不可用: {e}"
+                return result
             except Exception as e2:
                 logger.error("FFmpeg 降级也失败: %s", e2)
                 raise RuntimeError(
@@ -70,8 +75,10 @@ class VideoEditor:
     ) -> EditResult:
         task_description = self._build_las_description(segments, description)
 
+        video_url = self._resolve_video_url(video_path)
+
         task_input: dict[str, Any] = {
-            "video_url": video_path,
+            "video_url": video_url,
             "task_description": task_description,
             "output_format": "mp4",
         }
@@ -99,6 +106,24 @@ class VideoEditor:
             segments=seg_info,
             source="las",
         )
+
+    def _resolve_video_url(self, video_path: str) -> str:
+        """将本地视频路径转换为可公网访问的 URL。
+
+        如果已是 http/https URL 则直接返回；否则通过 Ark Files API 上传获取预签名 URL。
+        """
+        if video_path.startswith(("http://", "https://")):
+            return video_path
+
+        from .ark_client import ArkClient
+
+        client = ArkClient()
+        result = client.upload_file(video_path)
+        download_url = result.get("download_url", "")
+        if not download_url:
+            raise RuntimeError("Files API 未返回 download_url，LAS 剪辑无法继续，请稍后重试")
+        logger.info("本地视频已上传到 Files API，URL: %s", download_url[:80])
+        return download_url
 
     def _edit_with_ffmpeg(
         self,

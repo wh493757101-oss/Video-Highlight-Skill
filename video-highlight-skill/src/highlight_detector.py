@@ -49,6 +49,8 @@ class DetectionResult:
     segments: list[HighlightSegment] = field(default_factory=list)
     source: str = "rule"
     raw_response: dict[str, Any] | None = None
+    degraded: bool = False
+    degradation_reason: str = ""
 
 
 class HighlightDetector:
@@ -86,7 +88,10 @@ class HighlightDetector:
             if not self.config.fallback_enabled:
                 raise
             try:
-                return self._detect_rule_based(metadata)
+                result = self._detect_rule_based(metadata)
+                result.degraded = True
+                result.degradation_reason = f"Ark 多模态 API 不可用: {e}"
+                return result
             except Exception as e2:
                 logger.error("规则引擎降级也失败: %s", e2)
                 raise RuntimeError(

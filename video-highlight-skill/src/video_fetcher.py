@@ -109,6 +109,31 @@ class TosSource:
         return parts[0], parts[1]
 
 
+class ArkFileSource:
+    """通过 Ark Files API 上传本地文件并获取 HTTPS 预签名下载链接。
+
+    只需 ARK_API_KEY，无需 TOS 凭证。返回的 download_url 24 小时有效，
+    可直接作为 LAS las_video_edit 算子的输入 URL。
+    """
+
+    def __init__(self, path: str):
+        self.path = Path(path)
+
+    def resolve(self) -> str:
+        if not self.path.exists():
+            raise FileNotFoundError(f"视频文件不存在: {self.path}，请检查文件路径后重试")
+
+        from .ark_client import ArkClient
+
+        client = ArkClient()
+        result = client.upload_file(str(self.path.absolute()))
+        download_url = result.get("download_url", "")
+        if not download_url:
+            raise RuntimeError("Files API 未返回 download_url，请稍后重试")
+        logger.info("文件已上传到 Ark Files API: %s", download_url[:80])
+        return download_url
+
+
 class VideoFetcher:
     def __init__(self, output_dir: str | None = None):
         self.output_dir = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="vf_"))

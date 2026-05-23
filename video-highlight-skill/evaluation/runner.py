@@ -88,7 +88,7 @@ class EvalRunner:
 
     def _run_case(self, case: dict[str, Any]) -> dict[str, Any]:
         from src.main import PipelineConfig, VideoHighlightPipeline
-        from src.video_fetcher import LocalFileSource, UrlSource
+        from src.video_fetcher import LocalFileSource, TosSource, UrlSource
 
         source_type = case.get("source_type", "local")
         instruction = case.get("instruction", {})
@@ -98,7 +98,10 @@ class EvalRunner:
             PipelineConfig(output_dir=self.config.output_dir)
         )
 
-        if source_type == "remote":
+        if source_type == "tos":
+            tos_path = case.get("tos_path", "")
+            source = TosSource(tos_path)
+        elif source_type == "remote":
             source_url = case.get("source_url", "")
             source = UrlSource(source_url)
         else:

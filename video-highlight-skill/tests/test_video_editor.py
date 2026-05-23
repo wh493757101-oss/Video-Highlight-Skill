@@ -149,7 +149,7 @@ class TestVideoEditor:
 
         editor = VideoEditor()
         with pytest.raises(RuntimeError, match="LAS 未返回 task_id"):
-            editor._edit_with_las("/tmp/video.mp4", segments, "")
+            editor._edit_with_las("https://example.com/video.mp4", segments, "")
 
     def test_las_client_lazy_init(self, monkeypatch):
         monkeypatch.setenv("LAS_API_KEY", "test-key")
@@ -158,3 +158,43 @@ class TestVideoEditor:
         client = editor.las_client
         assert client is not None
         assert editor._las_client is not None
+
+
+class TestVideoEditorResolveVideoUrl:
+    def test_url_passthrough(self):
+        editor = VideoEditor()
+        url = "https://example.com/video.mp4"
+        result = editor._resolve_video_url(url)
+        assert result == url
+
+    def test_http_url_passthrough(self):
+        editor = VideoEditor()
+        url = "http://example.com/video.mp4"
+        result = editor._resolve_video_url(url)
+        assert result == url
+
+    def test_local_path_uploads(self, mocker, tmp_path):
+        video = tmp_path / "test.mp4"
+        video.write_bytes(b"fake video content")
+
+        mock_client = mocker.MagicMock()
+        mock_client.upload_file.return_value = {"download_url": "https://ark-cn-beijing.volces.com/dl/abc"}
+        mocker.patch("src.ark_client.ArkClient", return_value=mock_client)
+
+        editor = VideoEditor()
+        result = editor._resolve_video_url(str(video))
+
+        assert result == "https://ark-cn-beijing.volces.com/dl/abc"
+        mock_client.upload_file.assert_called_once_with(str(video))
+
+    def test_local_path_upload_no_url_raises(self, mocker, tmp_path):
+        video = tmp_path / "test.mp4"
+        video.write_bytes(b"fake video content")
+
+        mock_client = mocker.MagicMock()
+        mock_client.upload_file.return_value = {"id": "file-123"}
+        mocker.patch("src.ark_client.ArkClient", return_value=mock_client)
+
+        editor = VideoEditor()
+        with pytest.raises(RuntimeError, match="未返回 download_url"):
+            editor._resolve_video_url(str(video))

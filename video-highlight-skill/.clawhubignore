@@ -1,0 +1,31 @@
+# 评测方案调研
+evaluation/INDUSTRY_SURVEY
+
+# 构建产物
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# 测试缓存
+.pytest_cache/
+.coverage
+htmlcov/
+
+
+# 环境变量（含 API Key）
+.env
+
+# IDE / 编辑器
+.vscode/
+.idea/
+
+# Claude Code 本地配置
+.claude/
+.clawhub/
+
+# 项目文档（仅本地）
+CLAUDE.md
+PLAN.md
