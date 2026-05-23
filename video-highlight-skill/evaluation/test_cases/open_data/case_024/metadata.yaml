@@ -1,0 +1,7 @@
+id: case_024
+category: 体育
+difficulty: medium
+description: "paluma_jump"
+source: local
+expected_segments: 2
+expected_total_duration: 10.6

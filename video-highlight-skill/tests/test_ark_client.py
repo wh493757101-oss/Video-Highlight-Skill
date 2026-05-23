@@ -107,7 +107,7 @@ class TestArkClient:
         client = ArkClient(ArkConfig(api_key="test-key"))
         response = {"choices": [{"message": {"content": '{"key": "value"}'}}]}
         result = client.extract_json(response)
-        assert result == {"key": "value"}
+        assert result == {"key": "value", "_usage": {}}
 
     def test_extract_json_from_code_block(self):
         client = ArkClient(ArkConfig(api_key="test-key"))
@@ -117,10 +117,10 @@ class TestArkClient:
             ]
         }
         result = client.extract_json(response)
-        assert result == {"key": "value"}
+        assert result == {"key": "value", "_usage": {}}
 
     def test_extract_json_from_dict_content(self):
         client = ArkClient(ArkConfig(api_key="test-key"))
         response = {"choices": [{"message": {"content": {"key": "value"}}}]}
         result = client.extract_json(response)
-        assert result == {"key": "value"}
+        assert result == {"key": "value", "_usage": {}}

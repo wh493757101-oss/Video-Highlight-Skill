@@ -1,0 +1,7 @@
+id: case_018
+category: 户外
+difficulty: easy
+description: "Scuba"
+source: local
+expected_segments: 2
+expected_total_duration: 4.4

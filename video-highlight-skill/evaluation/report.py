@@ -22,6 +22,7 @@ class ReportGenerator:
         self,
         eval_report: Any,
         judge_report: Any,
+        weighted: dict[str, Any] | None = None,
     ) -> str:
         lines: list[str] = []
 
@@ -32,10 +33,28 @@ class ReportGenerator:
         lines.append("")
         lines.append("## 一、时间戳 IoU 评测")
         lines.append("")
-        lines.append(f"  整体 IoU:    {eval_report.overall_iou:.3f}")
+        lines.append(f"  整体 IoU:       {eval_report.overall_iou:.3f}")
         lines.append(f"  整体 Precision: {eval_report.overall_precision:.3f}")
         lines.append(f"  整体 Recall:    {eval_report.overall_recall:.3f}")
         lines.append(f"  整体 F1:        {eval_report.overall_f1:.3f}")
+        lines.append(f"  Hit Rate @1:    {eval_report.overall_hit_rate_1:.3f}")
+        lines.append(f"  Hit Rate @3:    {eval_report.overall_hit_rate_3:.3f}")
+        lines.append(f"  MAE (时间偏差): {eval_report.overall_mae:.2f}s")
+        lines.append("")
+        lines.append("  tIoU 分布:")
+        lines.append(f"    优秀 (≥0.8): {eval_report.iou_distribution.get('excellent', 0)}")
+        lines.append(f"    合格 (≥0.5): {eval_report.iou_distribution.get('qualified', 0)}")
+        lines.append(f"    不合格 (<0.5): {eval_report.iou_distribution.get('unqualified', 0)}")
+        lines.append("")
+        lines.append(f"  异常率: {eval_report.exception_rate:.1%} ({eval_report.exception_count}/{eval_report.total_count})")
+        lines.append("")
+        lines.append("## Token 效率")
+        lines.append("")
+        lines.append(f"  总 Token:        {eval_report.cost.total_tokens:,}")
+        lines.append(f"  Prompt Token:    {eval_report.cost.prompt_tokens:,}")
+        lines.append(f"  Completion Token:{eval_report.cost.completion_tokens:,}")
+        lines.append(f"  视频总时长:      {eval_report.cost.video_duration:.1f}s")
+        lines.append(f"  Token/分钟:      {eval_report.cost.tokens_per_minute:,.0f}")
 
         if eval_report.by_category:
             lines.append("")
@@ -57,22 +76,25 @@ class ReportGenerator:
 
         lines.append("")
         lines.append("  各用例详情:")
-        lines.append(f"  {'ID':<12} {'类型':<8} {'难度':<8} {'来源':<6} {'Prec':<8} {'Recall':<8} {'F1':<8}")
-        lines.append("  " + "-" * 60)
+        lines.append(f"  {'ID':<12} {'类型':<8} {'难度':<8} {'来源':<6} {'Prec':<8} {'Recall':<8} {'F1':<8} {'HR@1':<8} {'MAE':<8}")
+        lines.append("  " + "-" * 78)
         for score in eval_report.scores:
             if score.error:
                 lines.append(f"  {score.case_id:<12} {'-':<8} {'-':<8} {'-':<6} [SKIP] {score.error}")
             else:
                 lines.append(
                     f"  {score.case_id:<12} {score.category:<8} {score.difficulty:<8} "
-                    f"{score.source_type:<6} {score.precision:<8.3f} {score.recall:<8.3f} {score.f1:<8.3f}"
+                    f"{score.source_type:<6} {score.precision:<8.3f} {score.recall:<8.3f} "
+                    f"{score.f1:<8.3f} {score.hit_rate_1:<8.3f} {score.mae:<8.2f}"
                 )
 
         lines.append("")
         lines.append("## 二、LLM Judge 主观评测")
         lines.append("")
 
-        if hasattr(judge_report, 'overall_average'):
+        if hasattr(judge_report, 'degraded') and judge_report.degraded:
+            lines.append("  [降级] LLM Judge 不可用，已降级为纯量化评测")
+        elif hasattr(judge_report, 'overall_average'):
             lines.append(f"  节奏感:       {judge_report.overall_rhythm:.2f} / 5.0")
             lines.append(f"  内容完整性:   {judge_report.overall_completeness:.2f} / 5.0")
             lines.append(f"  精彩程度:     {judge_report.overall_excitement:.2f} / 5.0")
@@ -89,6 +111,22 @@ class ReportGenerator:
                         f"    #{i + 1}: {score.average:.1f}/5.0 — {score.overall_comment}"
                     )
 
+        # 加权总分
+        if weighted:
+            lines.append("")
+            lines.append("## 三、加权总分")
+            lines.append("")
+            if weighted.get("degraded"):
+                lines.append("  状态: LLM Judge 不可用，总分仅基于量化评测")
+                lines.append(f"  加权总分: {weighted['weighted_score']:.4f} / 1.0 (纯量化)")
+            else:
+                eval_part = weighted["eval_score"] * 0.5
+                judge_part = weighted["judge_score"] * 0.5
+                lines.append(f"  量化评测分 (F1): {weighted['eval_score']:.4f} × 0.5 = {eval_part:.4f}")
+                lines.append(f"  LLM Judge 分:    {weighted['judge_score']:.4f} × 0.5 = {judge_part:.4f}")
+                lines.append(f"  ─────────────────────────────────")
+                lines.append(f"  加权总分:        {weighted['weighted_score']:.4f} / 1.0")
+
         lines.append("")
         lines.append("=" * 70)
 
@@ -101,7 +139,7 @@ class ReportGenerator:
             if self.config.save_json:
                 json_path = out_dir / "report.json"
                 json_path.write_text(
-                    self._build_json(eval_report, judge_report),
+                    self._build_json(eval_report, judge_report, weighted),
                     encoding="utf-8",
                 )
                 logger.info("JSON 报告已保存: %s", json_path)
@@ -115,13 +153,27 @@ class ReportGenerator:
 
         return report_text
 
-    def _build_json(self, eval_report: Any, judge_report: Any) -> str:
+    def _build_json(self, eval_report: Any, judge_report: Any, weighted: dict[str, Any] | None = None) -> str:
         data: dict[str, Any] = {
             "iou_eval": {
                 "overall_iou": eval_report.overall_iou,
                 "overall_precision": eval_report.overall_precision,
                 "overall_recall": eval_report.overall_recall,
                 "overall_f1": eval_report.overall_f1,
+                "overall_hit_rate_1": round(eval_report.overall_hit_rate_1, 3),
+                "overall_hit_rate_3": round(eval_report.overall_hit_rate_3, 3),
+                "overall_mae": round(eval_report.overall_mae, 2),
+                "iou_distribution": eval_report.iou_distribution,
+                "exception_rate": round(eval_report.exception_rate, 3),
+                "exception_count": eval_report.exception_count,
+                "total_count": eval_report.total_count,
+                "cost": {
+                    "total_tokens": eval_report.cost.total_tokens,
+                    "prompt_tokens": eval_report.cost.prompt_tokens,
+                    "completion_tokens": eval_report.cost.completion_tokens,
+                    "video_duration": eval_report.cost.video_duration,
+                    "tokens_per_minute": round(eval_report.cost.tokens_per_minute, 1),
+                },
                 "by_category": {
                     k: {"f1": round(v["f1"], 3), "count": v["count"]}
                     for k, v in eval_report.by_category.items()
@@ -143,6 +195,10 @@ class ReportGenerator:
                         "precision": round(s.precision, 3),
                         "recall": round(s.recall, 3),
                         "f1": round(s.f1, 3),
+                        "hit_rate_1": round(s.hit_rate_1, 3),
+                        "hit_rate_3": round(s.hit_rate_3, 3),
+                        "mae": round(s.mae, 2),
+                        "iou_distribution": s.iou_distribution,
                         "error": s.error,
                     }
                     for s in eval_report.scores
@@ -157,6 +213,7 @@ class ReportGenerator:
                 "overall_excitement": round(judge_report.overall_excitement, 2),
                 "overall_instruction_fit": round(judge_report.overall_instruction_fit, 2),
                 "overall_average": round(judge_report.overall_average, 2),
+                "degraded": getattr(judge_report, "degraded", False),
                 "cases": [
                     {
                         "rhythm": s.rhythm,
@@ -170,6 +227,9 @@ class ReportGenerator:
                     for s in judge_report.scores
                 ],
             }
+
+        if weighted:
+            data["weighted_score"] = weighted
 
         return json.dumps(data, ensure_ascii=False, indent=2)
 

@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -57,6 +58,7 @@ class JudgeReport:
     overall_excitement: float = 0.0
     overall_instruction_fit: float = 0.0
     overall_average: float = 0.0
+    degraded: bool = False
 
 
 class LLMJudge:
@@ -99,29 +101,37 @@ class LLMJudge:
         target: str,
         style: str,
         segments: list[dict[str, Any]],
+        max_retries: int = 3,
     ) -> JudgeScore:
         prompt = self.build_prompt(category, target, style, segments)
 
-        try:
-            response = self.ark_client.chat(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=1024,
-            )
-            parsed = self.ark_client.extract_json(response)
+        last_error: str = ""
+        for attempt in range(max_retries):
+            try:
+                response = self.ark_client.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=1024,
+                )
+                parsed = self.ark_client.extract_json(response)
 
-            return JudgeScore(
-                rhythm=float(parsed.get("节奏感", 0)),
-                completeness=float(parsed.get("内容完整性", 0)),
-                excitement=float(parsed.get("精彩程度", 0)),
-                instruction_fit=float(parsed.get("指令契合度", 0)),
-                overall_comment=str(parsed.get("总体评价", "")),
-            )
-        except Exception as e:
-            logger.warning("LLM Judge 评分失败: %s", e)
-            return JudgeScore(error=str(e))
+                return JudgeScore(
+                    rhythm=float(parsed.get("节奏感", 0)),
+                    completeness=float(parsed.get("内容完整性", 0)),
+                    excitement=float(parsed.get("精彩程度", 0)),
+                    instruction_fit=float(parsed.get("指令契合度", 0)),
+                    overall_comment=str(parsed.get("总体评价", "")),
+                )
+            except Exception as e:
+                last_error = str(e)
+                if attempt < max_retries - 1:
+                    logger.warning("LLM Judge 评分失败（第 %d/%d 次）: %s，重试中...", attempt + 1, max_retries, e)
+                    time.sleep(1)
+                    continue
+                logger.warning("LLM Judge 评分失败（已重试 %d 次）: %s", max_retries, last_error)
+                return JudgeScore(error=last_error)
 
-    def judge_all(self, cases: list[dict[str, Any]]) -> JudgeReport:
+    def judge_all(self, cases: list[dict[str, Any]], max_retries: int = 3) -> JudgeReport:
         report = JudgeReport()
         if not cases:
             return report
@@ -138,6 +148,7 @@ class LLMJudge:
                 target=case.get("target", ""),
                 style=case.get("style", ""),
                 segments=case.get("segments", []),
+                max_retries=max_retries,
             )
             report.scores.append(score)
 
@@ -161,6 +172,8 @@ class LLMJudge:
                 + report.overall_excitement
                 + report.overall_instruction_fit
             ) / 4
+        else:
+            report.degraded = True
 
         return report
 

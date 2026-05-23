@@ -1,0 +1,7 @@
+id: case_010
+category: 户外
+difficulty: hard
+description: "Excavators river crossing"
+source: local
+expected_segments: 8
+expected_total_duration: 63.9

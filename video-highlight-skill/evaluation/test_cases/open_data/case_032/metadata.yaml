@@ -1,0 +1,7 @@
+id: case_032
+category: 边界
+difficulty: edge
+description: "视频无音频流"
+source: local
+expected_segments: 0
+expected_total_duration: 0.0

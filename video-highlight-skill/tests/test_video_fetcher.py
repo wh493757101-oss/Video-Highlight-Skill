@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
+import subprocess
 
 from src.video_fetcher import (
     LocalFileSource,
@@ -64,16 +65,37 @@ class TestUrlSource:
 
 
 class TestTosSource:
-    def test_resolve_raises_not_implemented(self):
+    def test_resolve_missing_config_raises(self):
         source = TosSource("tos://bucket/video.mp4")
-        with pytest.raises(NotImplementedError, match="TOS"):
+        with pytest.raises(RuntimeError, match="TOS 配置不完整"):
             source.resolve()
+
+    def test_parse_tos_path(self):
+        source = TosSource("tos://mybucket/path/to/video.mp4")
+        bucket, key = source._parse_tos_path()
+        assert bucket == "mybucket"
+        assert key == "path/to/video.mp4"
+
+    def test_parse_tos_path_invalid(self):
+        source = TosSource("tos://nokey")
+        with pytest.raises(ValueError, match="无效的 TOS 路径格式"):
+            source._parse_tos_path()
+
+    def test_resolve_success(self, mocker, tmp_path):
+        mock_boto = mocker.MagicMock()
+        mocker.patch.dict("sys.modules", {"boto3": mocker.MagicMock(), "botocore.client": mocker.MagicMock()})
+        mocker.patch("tempfile.mkdtemp", return_value=str(tmp_path))
+        mocker.patch.object(TosSource, "_parse_tos_path", return_value=("bucket", "key.mp4"))
+
+        source = TosSource("tos://bucket/key.mp4", endpoint="http://tos.example.com", access_key="ak", secret_key="sk")
+        result = source.resolve()
+        assert result.endswith("key.mp4")
 
 
 class TestVideoFetcher:
     def test_fetch_local_file(self, mocker, tmp_path):
         video = tmp_path / "test.mp4"
-        video.touch()
+        video.write_bytes(b"fake mp4 content")
 
         mock_cap = mocker.MagicMock()
         mock_cap.isOpened.return_value = True
@@ -106,7 +128,7 @@ class TestVideoFetcher:
 
     def test_fetch_cannot_open_video(self, mocker, tmp_path):
         video = tmp_path / "bad.mp4"
-        video.touch()
+        video.write_bytes(b"fake mp4 content")
 
         mock_cap = mocker.MagicMock()
         mock_cap.isOpened.return_value = False
@@ -167,3 +189,54 @@ class TestVideoFetcher:
 
         assert len(frames) == 3
         assert all(f.endswith(".jpg") for f in frames)
+
+    def test_fetch_empty_file_raises(self, tmp_path):
+        video = tmp_path / "empty.mp4"
+        video.write_text("")
+
+        fetcher = VideoFetcher(output_dir=str(tmp_path))
+        with pytest.raises(ValueError, match="视频文件为空"):
+            fetcher.fetch(LocalFileSource(str(video)))
+
+    def test_fetch_non_video_file_raises(self, mocker, tmp_path):
+        video = tmp_path / "fake.mp4"
+        video.write_text("this is not a video file")
+
+        mock_cap = mocker.MagicMock()
+        mock_cap.isOpened.return_value = True
+        mock_cap.get.side_effect = lambda prop: {
+            cv2.CAP_PROP_FPS: 0.0,
+            cv2.CAP_PROP_FRAME_COUNT: 0,
+            cv2.CAP_PROP_FRAME_WIDTH: 0,
+            cv2.CAP_PROP_FRAME_HEIGHT: 0,
+        }[prop]
+        mocker.patch("cv2.VideoCapture", return_value=mock_cap)
+
+        fetcher = VideoFetcher(output_dir=str(tmp_path))
+        with pytest.raises(ValueError, match="无法解析视频参数|视频文件中无视频帧"):
+            fetcher.fetch(LocalFileSource(str(video)))
+
+    def test_extract_audio_failure_returns_none(self, mocker, tmp_path):
+        mocker.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "ffmpeg", stderr="No audio stream"))
+        fetcher = VideoFetcher(output_dir=str(tmp_path))
+        result = fetcher._extract_audio("/tmp/video.mp4")
+        assert result is None
+
+    def test_extract_audio_timeout_returns_none(self, mocker, tmp_path):
+        mocker.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ffmpeg", 120))
+        fetcher = VideoFetcher(output_dir=str(tmp_path))
+        result = fetcher._extract_audio("/tmp/video.mp4")
+        assert result is None
+
+    def test_convert_to_mp4_failure_raises(self, mocker, tmp_path):
+        mocker.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "ffmpeg", stderr="conversion error"))
+        fetcher = VideoFetcher(output_dir=str(tmp_path))
+        with pytest.raises(RuntimeError, match="视频转码失败"):
+            fetcher._convert_to_mp4("/tmp/input.mov")
+
+    def test_load_audio_failure_returns_empty(self, mocker, tmp_path):
+        mocker.patch("librosa.load", side_effect=RuntimeError("corrupt audio"))
+        fetcher = VideoFetcher(output_dir=str(tmp_path))
+        y, sr = fetcher.load_audio("/tmp/bad.wav")
+        assert len(y) == 0
+        assert sr == 22050

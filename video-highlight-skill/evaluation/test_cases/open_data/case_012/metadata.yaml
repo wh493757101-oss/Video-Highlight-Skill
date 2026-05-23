@@ -1,0 +1,7 @@
+id: case_012
+category: 体育
+difficulty: easy
+description: "Jumps"
+source: local
+expected_segments: 1
+expected_total_duration: 3.4

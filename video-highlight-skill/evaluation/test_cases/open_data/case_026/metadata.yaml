@@ -1,0 +1,7 @@
+id: case_026
+category: 边界
+difficulty: edge
+description: "空视频文件（0 字节）"
+source: local
+expected_segments: 0
+expected_total_duration: 0.0

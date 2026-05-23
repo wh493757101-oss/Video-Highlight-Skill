@@ -312,3 +312,67 @@ class TestVideoHighlightPipeline:
         assert pipeline._fetcher is None
         assert pipeline._detector is None
         assert pipeline._editor is None
+
+    def test_run_fetch_exception_returns_error(self, mocker):
+        mocker.patch.object(
+            VideoHighlightPipeline, "fetcher",
+            new_callable=mocker.PropertyMock,
+            return_value=mocker.MagicMock(),
+        )
+        pipeline = VideoHighlightPipeline()
+        pipeline.fetcher.fetch.side_effect = FileNotFoundError("视频文件不存在")
+
+        result = pipeline.run(LocalFileSource("/nonexistent/video.mp4"))
+        assert result.error is not None
+        assert "视频文件不存在" in result.error
+
+    def test_run_detection_exception_returns_error(self, mocker, tmp_path):
+        metadata = self._make_metadata(tmp_path)
+
+        mocker.patch.object(
+            VideoHighlightPipeline, "fetcher",
+            new_callable=mocker.PropertyMock,
+            return_value=mocker.MagicMock(),
+        )
+        mocker.patch.object(
+            VideoHighlightPipeline, "detector",
+            new_callable=mocker.PropertyMock,
+            return_value=mocker.MagicMock(),
+        )
+        pipeline = VideoHighlightPipeline()
+        pipeline.fetcher.fetch.return_value = metadata
+        pipeline.detector.detect.side_effect = RuntimeError("模型调用失败")
+
+        result = pipeline.run(LocalFileSource(str(tmp_path / "video.mp4")))
+        assert result.error is not None
+        assert "模型调用失败" in result.error
+
+    def test_run_editor_exception_returns_error(self, mocker, tmp_path):
+        metadata = self._make_metadata(tmp_path)
+
+        mocker.patch.object(
+            VideoHighlightPipeline, "fetcher",
+            new_callable=mocker.PropertyMock,
+            return_value=mocker.MagicMock(),
+        )
+        mocker.patch.object(
+            VideoHighlightPipeline, "detector",
+            new_callable=mocker.PropertyMock,
+            return_value=mocker.MagicMock(),
+        )
+        mocker.patch.object(
+            VideoHighlightPipeline, "editor",
+            new_callable=mocker.PropertyMock,
+            return_value=mocker.MagicMock(),
+        )
+        pipeline = VideoHighlightPipeline()
+        pipeline.fetcher.fetch.return_value = metadata
+        pipeline.detector.detect.return_value = DetectionResult(
+            segments=[HighlightSegment(start_time=1.0, end_time=3.0, combined_score=0.8)],
+            source="rule",
+        )
+        pipeline.editor.edit.side_effect = RuntimeError("剪辑失败")
+
+        result = pipeline.run(LocalFileSource(str(tmp_path / "video.mp4")))
+        assert result.error is not None
+        assert "剪辑失败" in result.error

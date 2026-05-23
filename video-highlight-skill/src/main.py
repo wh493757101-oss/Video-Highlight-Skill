@@ -63,6 +63,23 @@ class VideoHighlightPipeline:
         asr_text: str = "",
         skip_edit: bool = False,
     ) -> PipelineResult:
+        try:
+            return self._run_impl(source, description, asr_text, skip_edit)
+        except Exception as e:
+            logger.error("Pipeline 执行失败: %s", e)
+            return PipelineResult(
+                metadata=VideoMetadata(path="", duration=0, fps=0, width=0, height=0),
+                detection=DetectionResult(source="error"),
+                error=f"处理失败，请稍后重试: {e}",
+            )
+
+    def _run_impl(
+        self,
+        source: VideoSource,
+        description: str = "",
+        asr_text: str = "",
+        skip_edit: bool = False,
+    ) -> PipelineResult:
         metadata = self.fetcher.fetch(source)
         logger.info("视频预处理完成: duration=%.1fs, fps=%.1f", metadata.duration, metadata.fps)
 

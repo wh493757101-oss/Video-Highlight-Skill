@@ -1,0 +1,7 @@
+id: case_005
+category: 户外
+difficulty: medium
+description: "Bus_in_Rock_Tunnel"
+source: local
+expected_segments: 3
+expected_total_duration: 13.3

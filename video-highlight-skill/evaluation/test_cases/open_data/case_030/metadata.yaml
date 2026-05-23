@@ -1,0 +1,7 @@
+id: case_030
+category: 边界
+difficulty: edge
+description: "非法 JSON 格式的 instruction"
+source: local
+expected_segments: 0
+expected_total_duration: 0.0

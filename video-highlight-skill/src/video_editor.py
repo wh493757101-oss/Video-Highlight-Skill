@@ -54,7 +54,13 @@ class VideoEditor:
             logger.warning("LAS 剪辑失败，降级到 FFmpeg: %s", e)
             if not self.config.fallback_enabled:
                 raise
-            return self._edit_with_ffmpeg(video_path, segments)
+            try:
+                return self._edit_with_ffmpeg(video_path, segments)
+            except Exception as e2:
+                logger.error("FFmpeg 降级也失败: %s", e2)
+                raise RuntimeError(
+                    "视频剪辑失败（LAS 和 FFmpeg 均不可用），请稍后重试"
+                ) from e2
 
     def _edit_with_las(
         self,

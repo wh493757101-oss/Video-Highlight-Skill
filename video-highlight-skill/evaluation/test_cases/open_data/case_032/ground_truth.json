@@ -1,0 +1,4 @@
+{
+  "highlights": [],
+  "expected_behavior": "降级到纯视觉规则引擎，正常输出"
+}

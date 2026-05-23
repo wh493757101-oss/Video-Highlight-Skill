@@ -1,0 +1,7 @@
+id: case_009
+category: 旅行
+difficulty: hard
+description: "Eiffel Tower"
+source: local
+expected_segments: 6
+expected_total_duration: 23.8

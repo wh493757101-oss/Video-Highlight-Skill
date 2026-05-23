@@ -5,10 +5,12 @@ import pytest
 
 from evaluation.evaluator import (
     CaseScore,
+    CostStats,
     EvalReport,
     HighlightEvaluator,
     SegmentMatch,
     TestCaseLoader,
+    compute_weighted_score,
 )
 from evaluation.llm_judge import (
     JudgeReport,
@@ -17,6 +19,7 @@ from evaluation.llm_judge import (
     format_judge_report,
 )
 from evaluation.report import ReportConfig, ReportGenerator
+from evaluation.runner import EvalRunConfig, EvalRunner
 
 
 class TestHighlightEvaluator:
@@ -88,6 +91,10 @@ class TestHighlightEvaluator:
         assert score.precision == 1.0
         assert score.recall == 1.0
         assert score.f1 == 1.0
+        assert score.hit_rate_1 == 1.0
+        assert score.hit_rate_3 == 1.0
+        assert score.mae == 0.0
+        assert score.iou_distribution["excellent"] == 1
         assert score.error is None
 
     def test_score_case_empty_gt(self):
@@ -127,6 +134,11 @@ class TestHighlightEvaluator:
 
         report = evaluator.evaluate_all(results)
         assert report.overall_f1 == 1.0
+        assert report.overall_hit_rate_1 == 1.0
+        assert report.overall_hit_rate_3 == 1.0
+        assert report.overall_mae == 0.0
+        assert report.iou_distribution["excellent"] == 2
+        assert report.exception_rate == 0.0
         assert len(report.scores) == 2
         assert "体育" in report.by_category
         assert "游戏" in report.by_category
@@ -139,6 +151,81 @@ class TestHighlightEvaluator:
         evaluator = HighlightEvaluator()
         report = evaluator.evaluate_all([])
         assert report.overall_f1 == 0.0
+
+    def test_hit_rate(self):
+        evaluator = HighlightEvaluator(iou_threshold=0.5)
+        predicted = [
+            {"start_time": 10.0, "end_time": 12.0},
+            {"start_time": 0.0, "end_time": 4.0},
+            {"start_time": 5.0, "end_time": 8.0},
+        ]
+        ground_truth = [
+            {"start_time": 0.0, "end_time": 4.0},
+            {"start_time": 5.0, "end_time": 8.0},
+        ]
+        assert evaluator.compute_hit_rate(predicted, ground_truth, 1) == 0.0
+        assert evaluator.compute_hit_rate(predicted, ground_truth, 3) == 2.0 / 3.0
+
+    def test_mae_computation(self):
+        evaluator = HighlightEvaluator()
+        predicted = [{"start_time": 1.0, "end_time": 6.0}]
+        ground_truth = [{"start_time": 0.0, "end_time": 5.0}]
+        score = evaluator.score_case("case_001", predicted, ground_truth)
+        assert score.mae == 1.0
+
+    def test_iou_distribution(self):
+        evaluator = HighlightEvaluator()
+        predicted = [
+            {"start_time": 0.0, "end_time": 5.0},
+            {"start_time": 6.0, "end_time": 9.0},
+            {"start_time": 10.0, "end_time": 12.0},
+        ]
+        ground_truth = [
+            {"start_time": 0.0, "end_time": 5.0},
+            {"start_time": 5.5, "end_time": 9.5},
+            {"start_time": 50.0, "end_time": 60.0},
+        ]
+        score = evaluator.score_case("case_001", predicted, ground_truth)
+        assert score.iou_distribution["excellent"] == 1
+        assert score.iou_distribution["qualified"] >= 1
+        assert score.iou_distribution["unqualified"] == 1
+
+    def test_exception_rate(self):
+        evaluator = HighlightEvaluator()
+        results = [
+            {"case_id": "c1", "predicted": [], "ground_truth": [], "category": "边界", "difficulty": "edge", "source_type": "local", "usage": {}, "video_duration": 0.0},
+            {"case_id": "c2", "predicted": [{"start_time": 0, "end_time": 5}], "ground_truth": [{"start_time": 0, "end_time": 5}], "category": "体育", "difficulty": "easy", "source_type": "local", "usage": {}, "video_duration": 120.0},
+        ]
+        report = evaluator.evaluate_all(results)
+        assert report.exception_count == 1
+        assert report.exception_rate == 0.5
+
+    def test_cost_aggregation(self):
+        evaluator = HighlightEvaluator()
+        results = [
+            {
+                "case_id": "c1",
+                "predicted": [{"start_time": 0, "end_time": 5}],
+                "ground_truth": [{"start_time": 0, "end_time": 5}],
+                "category": "体育", "difficulty": "easy", "source_type": "local",
+                "usage": {"prompt_tokens": 5000, "completion_tokens": 500},
+                "video_duration": 60.0,
+            },
+            {
+                "case_id": "c2",
+                "predicted": [{"start_time": 0, "end_time": 5}],
+                "ground_truth": [{"start_time": 0, "end_time": 5}],
+                "category": "体育", "difficulty": "easy", "source_type": "local",
+                "usage": {"prompt_tokens": 3000, "completion_tokens": 300},
+                "video_duration": 120.0,
+            },
+        ]
+        report = evaluator.evaluate_all(results)
+        assert report.cost.total_tokens == 8800
+        assert report.cost.prompt_tokens == 8000
+        assert report.cost.completion_tokens == 800
+        assert report.cost.video_duration == 180.0
+        assert report.cost.tokens_per_minute == pytest.approx(2933.33, rel=0.01)
 
 
 class TestLLMJudge:
@@ -300,7 +387,7 @@ class TestReportGenerator:
 
 class TestTestCaseLoader:
     def test_load_local_cases(self, tmp_path):
-        local_dir = tmp_path / "local"
+        local_dir = tmp_path / "open_data"
         local_dir.mkdir()
         cases_yaml = local_dir / "cases.yaml"
         cases_yaml.write_text("""
@@ -311,15 +398,13 @@ cases:
     description: "测试用例"
     video_file: "video.mp4"
     instruction:
-      target: "进球集锦"
-      duration_limit: "60秒以内"
-      style: "快节奏"
+      prompt: "帮我把这个足球视频的进球剪成60秒集锦，节奏要快"
 """, encoding="utf-8")
 
         case_dir = local_dir / "case_001"
         case_dir.mkdir()
         (case_dir / "instruction.json").write_text(
-            '{"target": "进球集锦", "duration_limit": "60秒以内", "style": "快节奏"}',
+            '{"prompt": "帮我把这个足球视频的进球剪成60秒集锦，节奏要快"}',
             encoding="utf-8",
         )
         (case_dir / "ground_truth.json").write_text(
@@ -337,7 +422,7 @@ cases:
         assert len(cases[0]["ground_truth"]) == 1
 
     def test_load_remote_cases(self, tmp_path):
-        remote_dir = tmp_path / "remote"
+        remote_dir = tmp_path / "self-built_data"
         remote_dir.mkdir()
         cases_yaml = remote_dir / "cases.yaml"
         cases_yaml.write_text("""
@@ -373,11 +458,11 @@ cases:
         assert cases[0]["source_url"] == "https://example.com/video.mp4"
 
     def test_load_all(self, tmp_path):
-        local_dir = tmp_path / "local"
+        local_dir = tmp_path / "open_data"
         local_dir.mkdir()
         (local_dir / "cases.yaml").write_text("cases: []", encoding="utf-8")
 
-        remote_dir = tmp_path / "remote"
+        remote_dir = tmp_path / "self-built_data"
         remote_dir.mkdir()
         (remote_dir / "cases.yaml").write_text("cases: []", encoding="utf-8")
 
@@ -389,3 +474,359 @@ cases:
         loader = TestCaseLoader(str(tmp_path))
         cases = loader.load_local_cases()
         assert cases == []
+
+
+class TestEvalRunner:
+    def test_run_no_cases(self, tmp_path):
+        local_dir = tmp_path / "open_data"
+        local_dir.mkdir()
+        (local_dir / "cases.yaml").write_text("cases: []", encoding="utf-8")
+
+        remote_dir = tmp_path / "self-built_data"
+        remote_dir.mkdir()
+        (remote_dir / "cases.yaml").write_text("cases: []", encoding="utf-8")
+
+        runner = EvalRunner(EvalRunConfig(test_cases_root=str(tmp_path)))
+        eval_report, judge_report, text = runner.run()
+        assert eval_report.overall_f1 == 0.0
+        assert judge_report.overall_average == 0.0
+
+    def test_run_with_mock_pipeline(self, mocker, tmp_path):
+        local_dir = tmp_path / "open_data"
+        local_dir.mkdir()
+        cases_yaml = local_dir / "cases.yaml"
+        cases_yaml.write_text("""
+cases:
+  - id: "case_001"
+    category: 体育
+    difficulty: easy
+    description: "测试"
+    video_file: "video.mp4"
+    instruction:
+      prompt: "测试指令"
+""", encoding="utf-8")
+
+        case_dir = local_dir / "case_001"
+        case_dir.mkdir()
+        (case_dir / "instruction.json").write_text(
+            '{"prompt": "测试指令"}', encoding="utf-8",
+        )
+        (case_dir / "ground_truth.json").write_text(
+            '{"highlights": [{"start_time": 0.0, "end_time": 5.0, "score": 0.9}]}',
+            encoding="utf-8",
+        )
+        (case_dir / "video.mp4").write_bytes(b"fake mp4")
+
+        from src.highlight_detector import DetectionResult
+        from src.rule_engine import HighlightSegment
+        from src.video_fetcher import VideoMetadata
+
+        mock_metadata = VideoMetadata(
+            path=str(case_dir / "video.mp4"),
+            duration=10.0, fps=30.0, width=1920, height=1080,
+        )
+        mock_detection = DetectionResult(
+            segments=[
+                HighlightSegment(start_time=1.0, end_time=4.0, combined_score=0.8),
+            ],
+            source="rule",
+        )
+
+        mocker.patch.object(
+            EvalRunner, "_run_case",
+            return_value={
+                "case_id": "case_001",
+                "category": "体育",
+                "difficulty": "easy",
+                "source_type": "local",
+                "predicted": [
+                    {"start_time": 1.0, "end_time": 4.0, "score": 0.8},
+                ],
+                "ground_truth": [
+                    {"start_time": 0.0, "end_time": 5.0, "score": 0.9},
+                ],
+                "target": "测试指令",
+                "style": "",
+            },
+        )
+
+        runner = EvalRunner(EvalRunConfig(
+            test_cases_root=str(tmp_path),
+            skip_llm_judge=True,
+        ))
+        eval_report, judge_report, text = runner.run()
+
+        assert len(eval_report.scores) == 1
+        assert eval_report.scores[0].case_id == "case_001"
+        assert eval_report.scores[0].precision > 0
+        assert "IoU" in text
+
+    def test_case_filter(self, mocker, tmp_path):
+        local_dir = tmp_path / "open_data"
+        local_dir.mkdir()
+        cases_yaml = local_dir / "cases.yaml"
+        cases_yaml.write_text("""
+cases:
+  - id: "case_001"
+    category: 体育
+    difficulty: easy
+    description: "测试1"
+    video_file: "video.mp4"
+    instruction:
+      prompt: "指令1"
+  - id: "case_002"
+    category: 户外
+    difficulty: medium
+    description: "测试2"
+    video_file: "video.mp4"
+    instruction:
+      prompt: "指令2"
+""", encoding="utf-8")
+
+        for cid in ["case_001", "case_002"]:
+            case_dir = local_dir / cid
+            case_dir.mkdir()
+            (case_dir / "instruction.json").write_text(
+                f'{{"prompt": "指令"}}', encoding="utf-8",
+            )
+            (case_dir / "ground_truth.json").write_text(
+                '{"highlights": []}', encoding="utf-8",
+            )
+            (case_dir / "video.mp4").write_bytes(b"fake mp4")
+
+        mocker.patch.object(EvalRunner, "_run_case", return_value={
+            "case_id": "case_001",
+            "category": "体育",
+            "difficulty": "easy",
+            "source_type": "local",
+            "predicted": [],
+            "ground_truth": [],
+            "target": "",
+            "style": "",
+        })
+
+        runner = EvalRunner(EvalRunConfig(
+            test_cases_root=str(tmp_path),
+            skip_llm_judge=True,
+            case_filter=["case_001"],
+        ))
+        eval_report, _, _ = runner.run()
+        assert len(eval_report.scores) == 1
+        assert eval_report.scores[0].case_id == "case_001"
+
+
+class TestWeightedScore:
+    def test_normal(self):
+        evaluator = HighlightEvaluator()
+        eval_report = evaluator.evaluate_all([
+            {
+                "case_id": "case_001",
+                "category": "体育",
+                "difficulty": "easy",
+                "source_type": "local",
+                "predicted": [{"start_time": 0.0, "end_time": 5.0}],
+                "ground_truth": [{"start_time": 0.0, "end_time": 5.0}],
+            },
+        ])
+        judge_report = JudgeReport(
+            scores=[JudgeScore(rhythm=4.0, completeness=4.0, excitement=4.0, instruction_fit=4.0)],
+            overall_rhythm=4.0,
+            overall_completeness=4.0,
+            overall_excitement=4.0,
+            overall_instruction_fit=4.0,
+            overall_average=4.0,
+        )
+
+        result = compute_weighted_score(eval_report, judge_report)
+        assert result["eval_score"] == 1.0
+        assert result["judge_score"] == 0.8
+        assert result["weighted_score"] == 0.9
+        assert result["degraded"] is False
+
+    def test_degraded(self):
+        evaluator = HighlightEvaluator()
+        eval_report = evaluator.evaluate_all([
+            {
+                "case_id": "case_001",
+                "category": "体育",
+                "difficulty": "easy",
+                "source_type": "local",
+                "predicted": [{"start_time": 0.0, "end_time": 5.0}],
+                "ground_truth": [{"start_time": 0.0, "end_time": 5.0}],
+            },
+        ])
+        judge_report = JudgeReport(degraded=True)
+
+        result = compute_weighted_score(eval_report, judge_report)
+        assert result["eval_score"] == 1.0
+        assert result["judge_score"] == 0.0
+        assert result["weighted_score"] == 1.0
+        assert result["degraded"] is True
+
+    def test_custom_weights(self):
+        evaluator = HighlightEvaluator()
+        eval_report = evaluator.evaluate_all([
+            {
+                "case_id": "case_001",
+                "category": "体育",
+                "difficulty": "easy",
+                "source_type": "local",
+                "predicted": [{"start_time": 0.0, "end_time": 5.0}],
+                "ground_truth": [{"start_time": 0.0, "end_time": 5.0}],
+            },
+        ])
+        judge_report = JudgeReport(
+            scores=[JudgeScore(rhythm=5.0, completeness=5.0, excitement=5.0, instruction_fit=5.0)],
+            overall_rhythm=5.0,
+            overall_completeness=5.0,
+            overall_excitement=5.0,
+            overall_instruction_fit=5.0,
+            overall_average=5.0,
+        )
+
+        result = compute_weighted_score(eval_report, judge_report, weight_eval=0.6, weight_judge=0.4)
+        assert result["weighted_score"] == 1.0 * 0.6 + 1.0 * 0.4
+
+    def test_judge_all_degraded(self):
+        judge = LLMJudge()
+        report = judge.judge_all([])
+        assert report.degraded is False
+
+        report2 = JudgeReport(degraded=True)
+        assert report2.degraded is True
+
+
+class TestLLMJudgeRetry:
+    def test_judge_retry_success_after_failure(self, mocker):
+        judge = LLMJudge()
+        mock_client = mocker.MagicMock()
+        mock_client.chat.side_effect = [
+            RuntimeError("临时错误"),
+            RuntimeError("临时错误"),
+            {
+                "choices": [{
+                    "message": {
+                        "content": '{"节奏感": 4, "内容完整性": 4, "精彩程度": 5, "指令契合度": 4, "总体评价": "不错"}'
+                    }
+                }]
+            },
+        ]
+        mock_client.extract_json.side_effect = lambda r: {
+            "节奏感": 4, "内容完整性": 4, "精彩程度": 5, "指令契合度": 4, "总体评价": "不错"
+        }
+        judge._ark_client = mock_client
+
+        score = judge.judge("体育", "测试", "", [], max_retries=3)
+        assert score.error is None
+        assert score.rhythm == 4.0
+        assert score.excitement == 5.0
+        assert mock_client.chat.call_count == 3
+
+    def test_judge_retry_all_fail(self, mocker):
+        judge = LLMJudge()
+        mock_client = mocker.MagicMock()
+        mock_client.chat.side_effect = RuntimeError("API 不可用")
+        judge._ark_client = mock_client
+
+        score = judge.judge("体育", "测试", "", [], max_retries=3)
+        assert score.error is not None
+        assert "API 不可用" in score.error
+        assert mock_client.chat.call_count == 3
+
+    def test_judge_all_with_retries_sets_degraded(self, mocker):
+        judge = LLMJudge()
+        mock_client = mocker.MagicMock()
+        mock_client.chat.side_effect = RuntimeError("全部失败")
+        mock_client.extract_json.side_effect = RuntimeError("全部失败")
+        judge._ark_client = mock_client
+
+        cases = [
+            {"category": "体育", "target": "测试", "style": "", "segments": [{"start_time": 0, "end_time": 5, "score": 0.9}]},
+        ]
+        report = judge.judge_all(cases, max_retries=2)
+        assert report.degraded is True
+        assert report.overall_average == 0.0
+        assert len(report.scores) == 1
+        assert report.scores[0].error is not None
+
+
+class TestReportWithWeightedScore:
+    def test_generate_with_weighted(self, tmp_path):
+        evaluator = HighlightEvaluator()
+        eval_report = evaluator.evaluate_all([
+            {
+                "case_id": "case_001",
+                "category": "体育",
+                "difficulty": "easy",
+                "source_type": "local",
+                "predicted": [{"start_time": 0.0, "end_time": 5.0}],
+                "ground_truth": [{"start_time": 0.0, "end_time": 5.0}],
+            },
+        ])
+        judge_report = JudgeReport(
+            scores=[JudgeScore(rhythm=4.0, completeness=4.0, excitement=5.0, instruction_fit=4.0, overall_comment="不错")],
+            overall_rhythm=4.0,
+            overall_completeness=4.0,
+            overall_excitement=5.0,
+            overall_instruction_fit=4.0,
+            overall_average=4.25,
+        )
+        weighted = {"eval_score": 1.0, "judge_score": 0.85, "weighted_score": 0.925, "degraded": False}
+
+        gen = ReportGenerator(ReportConfig(output_dir=str(tmp_path), save_charts=False))
+        text = gen.generate(eval_report, judge_report, weighted)
+
+        assert "加权总分" in text
+        assert "0.9250" in text
+
+    def test_generate_with_degraded_weighted(self, tmp_path):
+        evaluator = HighlightEvaluator()
+        eval_report = evaluator.evaluate_all([
+            {
+                "case_id": "case_001",
+                "category": "体育",
+                "difficulty": "easy",
+                "source_type": "local",
+                "predicted": [{"start_time": 0.0, "end_time": 5.0}],
+                "ground_truth": [{"start_time": 0.0, "end_time": 5.0}],
+            },
+        ])
+        judge_report = JudgeReport(degraded=True)
+        weighted = {"eval_score": 1.0, "judge_score": 0.0, "weighted_score": 1.0, "degraded": True}
+
+        gen = ReportGenerator(ReportConfig(output_dir=str(tmp_path), save_charts=False))
+        text = gen.generate(eval_report, judge_report, weighted)
+
+        assert "降级" in text
+        assert "纯量化" in text
+
+    def test_json_report_includes_weighted_score(self, tmp_path):
+        evaluator = HighlightEvaluator()
+        eval_report = evaluator.evaluate_all([
+            {
+                "case_id": "case_001",
+                "category": "体育",
+                "difficulty": "easy",
+                "source_type": "local",
+                "predicted": [{"start_time": 0.0, "end_time": 5.0}],
+                "ground_truth": [{"start_time": 0.0, "end_time": 5.0}],
+            },
+        ])
+        judge_report = JudgeReport(
+            scores=[JudgeScore(rhythm=4.0, completeness=4.0, excitement=5.0, instruction_fit=4.0, overall_comment="不错")],
+            overall_rhythm=4.0,
+            overall_completeness=4.0,
+            overall_excitement=5.0,
+            overall_instruction_fit=4.0,
+            overall_average=4.25,
+        )
+        weighted = {"eval_score": 1.0, "judge_score": 0.85, "weighted_score": 0.925, "degraded": False}
+
+        gen = ReportGenerator(ReportConfig(output_dir=str(tmp_path), save_charts=False))
+        gen.generate(eval_report, judge_report, weighted)
+
+        json_path = tmp_path / "report.json"
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        assert "weighted_score" in data
+        assert data["weighted_score"]["weighted_score"] == 0.925
+        assert data["llm_judge"]["degraded"] is False

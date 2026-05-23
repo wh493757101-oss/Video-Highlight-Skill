@@ -1,0 +1,16 @@
+{
+  "highlights": [
+    {
+      "start_time": 72.8,
+      "end_time": 85.9,
+      "label": "高光",
+      "score": 0.58
+    },
+    {
+      "start_time": 156.1,
+      "end_time": 168.0,
+      "label": "高光",
+      "score": 0.5
+    }
+  ]
+}

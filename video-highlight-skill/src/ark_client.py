@@ -113,12 +113,16 @@ class ArkClient:
 
     def extract_json(self, response: dict[str, Any]) -> dict[str, Any]:
         content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+        usage = response.get("usage", {})
         if isinstance(content, dict):
-            return content
-        if isinstance(content, str):
+            result = dict(content)
+        elif isinstance(content, str):
             content = content.strip()
             if content.startswith("```"):
                 lines = content.split("\n")
                 content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            return json.loads(content)
-        return {}
+            result = json.loads(content)
+        else:
+            result = {}
+        result["_usage"] = usage
+        return result

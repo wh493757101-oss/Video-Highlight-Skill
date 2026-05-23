@@ -9,3 +9,14 @@ venv/
 htmlcov/
 dist/
 *.egg-info/
+output/
+
+# 测试用例视频文件（体积大，不上传）
+video-highlight-skill/evaluation/test_cases/**/*.mp4
+
+# Claude Code 本地配置
+.claude/
+.clawhub/
+
+# ClawHub SDK 本地副本
+ClawHub/

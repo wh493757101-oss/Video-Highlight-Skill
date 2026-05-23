@@ -1,0 +1,7 @@
+id: case_021
+category: 旅行
+difficulty: hard
+description: "Uncut_Evening_Flight"
+source: local
+expected_segments: 5
+expected_total_duration: 37.7

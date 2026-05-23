@@ -85,11 +85,19 @@ class HighlightDetector:
             logger.warning("多模态检测失败，降级到规则引擎: %s", e)
             if not self.config.fallback_enabled:
                 raise
-            return self._detect_rule_based(metadata)
+            try:
+                return self._detect_rule_based(metadata)
+            except Exception as e2:
+                logger.error("规则引擎降级也失败: %s", e2)
+                raise RuntimeError(
+                    "高光检测失败（多模态和规则引擎均不可用），请稍后重试"
+                ) from e2
 
     def _detect_multimodal(
         self, metadata: VideoMetadata, asr_text: str
     ) -> DetectionResult:
+        if not metadata.frames_dir:
+            raise ValueError("frames_dir 为空，无法进行多模态检测")
         frame_paths = sorted(Path(metadata.frames_dir).glob("*.jpg"))
         if not frame_paths:
             raise ValueError("没有可用的关键帧")

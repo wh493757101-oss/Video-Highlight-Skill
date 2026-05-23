@@ -1,0 +1,7 @@
+id: case_001
+category: 旅行
+difficulty: medium
+description: "Air_Force_One"
+source: local
+expected_segments: 2
+expected_total_duration: 25.0

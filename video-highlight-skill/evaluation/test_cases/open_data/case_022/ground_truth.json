@@ -1,0 +1,34 @@
+{
+  "highlights": [
+    {
+      "start_time": 89.2,
+      "end_time": 92.3,
+      "label": "高光",
+      "score": 0.57
+    },
+    {
+      "start_time": 160.2,
+      "end_time": 166.1,
+      "label": "高光",
+      "score": 0.57
+    },
+    {
+      "start_time": 11.0,
+      "end_time": 15.8,
+      "label": "高光",
+      "score": 0.49
+    },
+    {
+      "start_time": 39.7,
+      "end_time": 41.6,
+      "label": "高光",
+      "score": 0.46
+    },
+    {
+      "start_time": 66.8,
+      "end_time": 68.9,
+      "label": "高光",
+      "score": 0.44
+    }
+  ]
+}

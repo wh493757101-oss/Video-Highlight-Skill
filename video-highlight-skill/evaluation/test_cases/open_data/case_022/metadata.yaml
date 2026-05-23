@@ -1,0 +1,7 @@
+id: case_022
+category: 体育
+difficulty: medium
+description: "Valparaiso_Downhill"
+source: local
+expected_segments: 5
+expected_total_duration: 17.8

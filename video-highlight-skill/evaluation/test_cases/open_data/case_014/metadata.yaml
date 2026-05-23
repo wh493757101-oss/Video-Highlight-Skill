@@ -1,0 +1,7 @@
+id: case_014
+category: 旅行
+difficulty: hard
+description: "Notre_Dame"
+source: local
+expected_segments: 4
+expected_total_duration: 19.8

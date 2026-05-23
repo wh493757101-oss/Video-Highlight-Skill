@@ -1,0 +1,7 @@
+id: case_031
+category: 边界
+difficulty: edge
+description: "超长 instruction（5000 字）"
+source: local
+expected_segments: 0
+expected_total_duration: 0.0

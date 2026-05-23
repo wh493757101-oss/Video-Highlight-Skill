@@ -17,6 +17,9 @@ class SegmentMatch:
     gt_end: float
     iou: float
     hit: bool
+    mae_start: float = 0.0
+    mae_end: float = 0.0
+    mae_avg: float = 0.0
 
 
 @dataclass
@@ -29,8 +32,21 @@ class CaseScore:
     precision: float = 0.0
     recall: float = 0.0
     f1: float = 0.0
+    hit_rate_1: float = 0.0
+    hit_rate_3: float = 0.0
+    mae: float = 0.0
+    iou_distribution: dict[str, int] = field(default_factory=dict)
     matched_pairs: list[SegmentMatch] = field(default_factory=list)
     error: str | None = None
+
+
+@dataclass
+class CostStats:
+    total_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    video_duration: float = 0.0
+    tokens_per_minute: float = 0.0
 
 
 @dataclass
@@ -40,6 +56,16 @@ class EvalReport:
     overall_precision: float = 0.0
     overall_recall: float = 0.0
     overall_f1: float = 0.0
+    overall_hit_rate_1: float = 0.0
+    overall_hit_rate_3: float = 0.0
+    overall_mae: float = 0.0
+    iou_distribution: dict[str, int] = field(default_factory=lambda: {
+        "excellent": 0, "qualified": 0, "unqualified": 0,
+    })
+    exception_rate: float = 0.0
+    exception_count: int = 0
+    total_count: int = 0
+    cost: CostStats = field(default_factory=CostStats)
     by_category: dict[str, dict[str, float]] = field(default_factory=dict)
     by_difficulty: dict[str, dict[str, float]] = field(default_factory=dict)
     by_source: dict[str, dict[str, float]] = field(default_factory=dict)
@@ -87,6 +113,9 @@ class HighlightEvaluator:
             if hit and best_gt is not None:
                 gt_used.add(best_gt_idx)
 
+            mae_start = abs(pred["start_time"] - best_gt["start_time"]) if best_gt else 0.0
+            mae_end = abs(pred["end_time"] - best_gt["end_time"]) if best_gt else 0.0
+
             matches.append(SegmentMatch(
                 predicted_start=pred["start_time"],
                 predicted_end=pred["end_time"],
@@ -94,9 +123,40 @@ class HighlightEvaluator:
                 gt_end=best_gt["end_time"] if best_gt else 0.0,
                 iou=best_iou,
                 hit=hit,
+                mae_start=mae_start,
+                mae_end=mae_end,
+                mae_avg=(mae_start + mae_end) / 2,
             ))
 
         return matches
+
+    def compute_hit_rate(
+        self,
+        predicted: list[dict[str, Any]],
+        ground_truth: list[dict[str, Any]],
+        k: int,
+    ) -> float:
+        if not ground_truth or not predicted:
+            return 0.0
+        top_k = predicted[:k]
+        hits = 0
+        for pred in top_k:
+            for gt in ground_truth:
+                iou = self.compute_iou(
+                    pred["start_time"], pred["end_time"],
+                    gt["start_time"], gt["end_time"],
+                )
+                if iou >= self.iou_threshold:
+                    hits += 1
+                    break
+        return hits / min(k, len(predicted))
+
+    def classify_iou(self, iou: float) -> str:
+        if iou >= 0.8:
+            return "excellent"
+        elif iou >= 0.5:
+            return "qualified"
+        return "unqualified"
 
     def score_case(
         self,
@@ -135,6 +195,18 @@ class HighlightEvaluator:
         recall = hit_count / len(ground_truth) if ground_truth else 0.0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
+        hit_rate_1 = self.compute_hit_rate(predicted, ground_truth, 1)
+        hit_rate_3 = self.compute_hit_rate(predicted, ground_truth, 3)
+
+        mae = 0.0
+        hit_matches = [m for m in matches if m.hit]
+        if hit_matches:
+            mae = sum(m.mae_avg for m in hit_matches) / len(hit_matches)
+
+        iou_dist: dict[str, int] = {"excellent": 0, "qualified": 0, "unqualified": 0}
+        for iou in iou_scores:
+            iou_dist[self.classify_iou(iou)] += 1
+
         return CaseScore(
             case_id=case_id,
             category=category,
@@ -144,6 +216,10 @@ class HighlightEvaluator:
             precision=precision,
             recall=recall,
             f1=f1,
+            hit_rate_1=hit_rate_1,
+            hit_rate_3=hit_rate_3,
+            mae=mae,
+            iou_distribution=iou_dist,
             matched_pairs=matches,
         )
 
@@ -156,6 +232,10 @@ class HighlightEvaluator:
         total_recall = 0.0
         total_f1 = 0.0
         total_iou = 0.0
+        total_hit1 = 0.0
+        total_hit3 = 0.0
+        total_mae = 0.0
+        mae_count = 0
         iou_count = 0
 
         cat_scores: dict[str, list[float]] = {}
@@ -179,9 +259,15 @@ class HighlightEvaluator:
             total_precision += score.precision
             total_recall += score.recall
             total_f1 += score.f1
+            total_hit1 += score.hit_rate_1
+            total_hit3 += score.hit_rate_3
+            if score.mae > 0 or score.matched_pairs:
+                total_mae += score.mae
+                mae_count += 1
             for iou in score.iou_scores:
                 total_iou += iou
                 iou_count += 1
+                report.iou_distribution[self.classify_iou(iou)] += 1
 
             cat_scores.setdefault(score.category, []).append(score.f1)
             dif_scores.setdefault(score.difficulty, []).append(score.f1)
@@ -192,6 +278,15 @@ class HighlightEvaluator:
         report.overall_recall = total_recall / n
         report.overall_f1 = total_f1 / n
         report.overall_iou = total_iou / iou_count if iou_count > 0 else 0.0
+        report.overall_hit_rate_1 = total_hit1 / n
+        report.overall_hit_rate_3 = total_hit3 / n
+        report.overall_mae = total_mae / mae_count if mae_count > 0 else 0.0
+
+        report.exception_count = len([s for s in report.scores if s.error])
+        report.total_count = len(report.scores)
+        report.exception_rate = report.exception_count / report.total_count if report.total_count > 0 else 0.0
+
+        report.cost = self._aggregate_costs(results)
 
         report.by_category = {
             k: {"f1": sum(v) / len(v), "count": len(v)}
@@ -202,86 +297,123 @@ class HighlightEvaluator:
             for k, v in dif_scores.items()
         }
         report.by_source = {
-            k: {"f1": sum(v) / len(v), "count": len(v)}
+            k: {"f1": sum(v) / len(v) if v else 0.0, "count": len(v)}
             for k, v in src_scores.items()
         }
 
         return report
+
+    def _aggregate_costs(self, results: list[dict[str, Any]]) -> CostStats:
+        total_prompt = 0
+        total_completion = 0
+        total_duration = 0.0
+        for r in results:
+            usage = r.get("usage", {})
+            total_prompt += usage.get("prompt_tokens", 0)
+            total_completion += usage.get("completion_tokens", 0)
+            total_duration += r.get("video_duration", 0.0)
+
+        total_tokens = total_prompt + total_completion
+        tokens_per_minute = total_tokens / (total_duration / 60.0) if total_duration > 0 else 0.0
+
+        return CostStats(
+            total_tokens=total_tokens,
+            prompt_tokens=total_prompt,
+            completion_tokens=total_completion,
+            video_duration=total_duration,
+            tokens_per_minute=tokens_per_minute,
+        )
+
+
+def compute_weighted_score(
+    eval_report: EvalReport,
+    judge_report: Any,
+    weight_eval: float = 0.5,
+    weight_judge: float = 0.5,
+) -> dict[str, Any]:
+    eval_score = eval_report.overall_f1
+    judge_normalized = 0.0
+    degraded = getattr(judge_report, "degraded", False)
+
+    if not degraded and hasattr(judge_report, "overall_average") and judge_report.overall_average > 0:
+        judge_normalized = judge_report.overall_average / 5.0
+
+    if degraded:
+        weighted = eval_score
+    else:
+        weighted = eval_score * weight_eval + judge_normalized * weight_judge
+
+    return {
+        "eval_score": round(eval_score, 4),
+        "judge_score": round(judge_normalized, 4),
+        "weighted_score": round(weighted, 4),
+        "degraded": degraded,
+    }
 
 
 class TestCaseLoader:
     def __init__(self, test_cases_root: str):
         self.root = Path(test_cases_root)
 
-    def load_local_cases(self) -> list[dict[str, Any]]:
-        cases_yaml = self.root / "local" / "cases.yaml"
+    def _load_cases_from_dir(
+        self, dir_name: str, source_type: str
+    ) -> list[dict[str, Any]]:
+        cases_yaml = self.root / dir_name / "cases.yaml"
         if not cases_yaml.exists():
             return []
 
         with open(cases_yaml, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
+            try:
+                data = yaml.safe_load(f)
+            except yaml.YAMLError as e:
+                logger.error("YAML 解析失败 [%s]: %s", cases_yaml, e)
+                return []
 
         cases: list[dict[str, Any]] = []
         for c in data.get("cases", []):
-            case_dir = self.root / "local" / c["id"]
+            case_dir = self.root / dir_name / c["id"]
             instruction_path = case_dir / "instruction.json"
             gt_path = case_dir / "ground_truth.json"
 
             instruction = {}
             if instruction_path.exists():
-                instruction = json.loads(instruction_path.read_text(encoding="utf-8"))
+                try:
+                    instruction = json.loads(instruction_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning("instruction.json 解析失败 [%s]: %s", c["id"], e)
+                    instruction = {"prompt": "", "parse_error": str(e)}
 
             ground_truth = []
             if gt_path.exists():
-                gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
-                ground_truth = gt_data.get("highlights", [])
+                try:
+                    gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
+                    ground_truth = gt_data.get("highlights", [])
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                    logger.warning("ground_truth.json 解析失败 [%s]: %s", c["id"], e)
+                    ground_truth = []
 
-            cases.append({
+            case: dict[str, Any] = {
                 "case_id": c["id"],
                 "category": c["category"],
                 "difficulty": c["difficulty"],
-                "source_type": "local",
+                "source_type": source_type,
                 "video_path": str(case_dir / c.get("video_file", "video.mp4")),
                 "instruction": instruction,
                 "ground_truth": ground_truth,
-            })
+            }
+
+            if source_type == "remote":
+                case["source_url"] = c.get("source_url", "")
+
+            cases.append(case)
 
         return cases
+
+    def load_local_cases(self) -> list[dict[str, Any]]:
+        return self._load_cases_from_dir("open_data", "local")
 
     def load_remote_cases(self) -> list[dict[str, Any]]:
-        cases_yaml = self.root / "remote" / "cases.yaml"
-        if not cases_yaml.exists():
-            return []
-
-        with open(cases_yaml, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-
-        cases: list[dict[str, Any]] = []
-        for c in data.get("cases", []):
-            case_dir = self.root / "remote" / c["id"]
-            instruction_path = case_dir / "instruction.json"
-            gt_path = case_dir / "ground_truth.json"
-
-            instruction = {}
-            if instruction_path.exists():
-                instruction = json.loads(instruction_path.read_text(encoding="utf-8"))
-
-            ground_truth = []
-            if gt_path.exists():
-                gt_data = json.loads(gt_path.read_text(encoding="utf-8"))
-                ground_truth = gt_data.get("highlights", [])
-
-            cases.append({
-                "case_id": c["id"],
-                "category": c["category"],
-                "difficulty": c["difficulty"],
-                "source_type": "remote",
-                "source_url": c.get("source_url", ""),
-                "instruction": instruction,
-                "ground_truth": ground_truth,
-            })
-
-        return cases
+        return self._load_cases_from_dir("self-built_data", "remote")
 
     def load_all(self) -> list[dict[str, Any]]:
         return self.load_local_cases() + self.load_remote_cases()
