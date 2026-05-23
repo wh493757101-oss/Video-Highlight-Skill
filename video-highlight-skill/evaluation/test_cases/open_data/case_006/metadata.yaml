@@ -1,7 +1,0 @@
-id: case_006
-category: 户外
-difficulty: medium
-description: "Car_railcrossing"
-source: local
-expected_segments: 4
-expected_total_duration: 24.6

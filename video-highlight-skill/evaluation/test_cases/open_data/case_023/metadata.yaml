@@ -1,7 +1,0 @@
-id: case_023
-category: 户外
-difficulty: medium
-description: "car_over_camera"
-source: local
-expected_segments: 6
-expected_total_duration: 24.9

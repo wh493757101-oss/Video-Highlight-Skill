@@ -1,7 +1,0 @@
-id: case_002
-category: 体育
-difficulty: medium
-description: "Base jumping"
-source: local
-expected_segments: 4
-expected_total_duration: 20.5

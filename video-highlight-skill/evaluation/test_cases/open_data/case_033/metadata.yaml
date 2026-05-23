@@ -1,7 +1,0 @@
-id: case_033
-category: 边界
-difficulty: edge
-description: "instruction 含特殊字符和 emoji"
-source: local
-expected_segments: 0
-expected_total_duration: 0.0

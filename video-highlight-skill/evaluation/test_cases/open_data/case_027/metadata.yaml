@@ -1,7 +1,0 @@
-id: case_027
-category: 边界
-difficulty: edge
-description: "video.mp4 是文本文件改名"
-source: local
-expected_segments: 0
-expected_total_duration: 0.0

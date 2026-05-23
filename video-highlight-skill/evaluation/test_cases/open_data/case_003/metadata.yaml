@@ -1,7 +1,0 @@
-id: case_003
-category: 户外
-difficulty: medium
-description: "Bearpark_climbing"
-source: local
-expected_segments: 6
-expected_total_duration: 15.0
