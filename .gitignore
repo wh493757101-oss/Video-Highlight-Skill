@@ -11,8 +11,8 @@ dist/
 *.egg-info/
 output/
 
-# 测试用例视频文件（体积大，不上传）
-video-highlight-skill/evaluation/test_cases/**/*.mp4
+# 测试用例（不上传）
+video-highlight-skill/evaluation/test_cases/
 
 # Claude Code 本地配置
 .claude/
@@ -20,3 +20,9 @@ video-highlight-skill/evaluation/test_cases/**/*.mp4
 
 # ClawHub SDK 本地副本
 ClawHub/
+
+# Claude Code 项目指引（不上传）
+CLAUDE.md
+
+# 技术方案文档（不上传）
+PLAN.md
