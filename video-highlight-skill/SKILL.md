@@ -13,7 +13,7 @@ metadata:
       bins:
         - ffmpeg
     primaryEnv: ARK_API_KEY
-    env:
+    envVars:
       - name: ARK_API_KEY
         description: "火山方舟 Ark API Key，用于多模态高光检测"
         required: true
