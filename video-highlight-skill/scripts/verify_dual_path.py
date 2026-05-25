@@ -6,8 +6,6 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
 logger = logging.getLogger("dual_verify")
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 
 def verify_local(video_path: str, description: str):
     from src.main import VideoHighlightPipeline, PipelineConfig
@@ -76,6 +74,7 @@ def verify_url(url: str, description: str):
 
 
 def main():
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     import yaml
 
     cases_yaml = os.path.join(

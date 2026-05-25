@@ -3,6 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -30,8 +31,10 @@ def _get_ffmpeg() -> str:
             return candidate
     try:
         import imageio_ffmpeg
-        _FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
-        return _FFMPEG_PATH
+        exe: str | None = imageio_ffmpeg.get_ffmpeg_exe()
+        if exe and Path(exe).exists():
+            _FFMPEG_PATH = exe
+            return _FFMPEG_PATH
     except ImportError:
         pass
     _FFMPEG_PATH = "ffmpeg"
@@ -248,6 +251,7 @@ class VideoFetcher:
         if not cap.isOpened():
             raise RuntimeError(f"无法打开视频: {video_path}，请检查文件格式后重试")
 
+        can_decode = False
         try:
             fps = cap.get(cv2.CAP_PROP_FPS)
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -309,7 +313,7 @@ class VideoFetcher:
             if "Audio:" not in stderr_text:
                 logger.info("视频无音频流，跳过音频提取")
                 return None
-        except Exception:
+        except (subprocess.SubprocessError, OSError):
             pass
 
         cmd = [
@@ -334,7 +338,6 @@ class VideoFetcher:
 
     def _sample_keyframes(self, video_path: str, interval: float = 2.0) -> str:
         # 使用纯 ASCII 目录名避免 Windows 上 cv2.imwrite 的 Unicode 路径问题
-        import uuid
         safe_name = uuid.uuid4().hex[:12]
         frames_dir = self.output_dir / "frames" / safe_name
         frames_dir.mkdir(parents=True, exist_ok=True)
@@ -363,7 +366,9 @@ class VideoFetcher:
                     if ok:
                         with open(frame_path, "wb") as f:
                             f.write(buf.tobytes())
-                    saved += 1
+                        saved += 1
+                    else:
+                        logger.warning("关键帧编码失败: 第 %d 帧", idx)
                 idx += 1
         finally:
             cap.release()
