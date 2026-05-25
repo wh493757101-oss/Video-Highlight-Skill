@@ -151,5 +151,6 @@ class EvalRunner:
                 "target": r.get("target", ""),
                 "style": r.get("style", ""),
                 "segments": r["predicted"],
+                "video_path": r.get("video_path", ""),
             })
         return judge_cases

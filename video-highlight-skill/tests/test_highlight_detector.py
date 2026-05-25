@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +18,7 @@ class TestDetectorConfig:
         cfg = DetectorConfig()
         assert cfg.frame_interval == 2.0
         assert cfg.max_frames_per_batch == 16
-        assert cfg.ark_model == "doubao-seed-2-0-pro"
+        assert cfg.ark_model == os.environ.get("ARK_HIGHLIGHT_MODEL", "doubao-seed-2-0-pro")
         assert cfg.fallback_enabled is True
 
     def test_custom(self):

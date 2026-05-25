@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ArkConfig:
     api_key: str = field(default_factory=lambda: os.getenv("ARK_API_KEY", ""))
     base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
-    model: str = "doubao-seed-2-0-pro"
+    model: str = field(default_factory=lambda: os.environ.get("ARK_MODEL", "doubao-seed-2-0-pro"))
     max_retries: int = 3
     timeout: float = 120.0
 

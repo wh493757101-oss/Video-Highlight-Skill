@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 class DetectorConfig:
     frame_interval: float = 2.0
     max_frames_per_batch: int = 16
-    ark_model: str = "doubao-seed-2-0-pro"
+    ark_model: str = field(default_factory=lambda: os.environ.get("ARK_HIGHLIGHT_MODEL", "doubao-seed-2-0-pro"))
     ark_temperature: float = 0.3
     ark_max_tokens: int = 4096
     fallback_enabled: bool = True

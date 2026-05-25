@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from src.ark_client import ArkClient, ArkConfig
@@ -8,7 +10,7 @@ class TestArkConfig:
         config = ArkConfig(api_key="test-key")
         assert config.api_key == "test-key"
         assert config.base_url == "https://ark.cn-beijing.volces.com/api/v3"
-        assert config.model == "doubao-seed-2-0-pro"
+        assert config.model == os.environ.get("ARK_MODEL", "doubao-seed-2-0-pro")
         assert config.max_retries == 3
 
     def test_custom_config(self):
