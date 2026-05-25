@@ -68,7 +68,8 @@ class HighlightDetector:
     @property
     def ark_client(self) -> ArkClient:
         if self._ark_client is None:
-            self._ark_client = ArkClient()
+            api_key = os.environ.get("ARK_HIGHLIGHT_API_KEY", os.environ.get("ARK_API_KEY", ""))
+            self._ark_client = ArkClient(ArkConfig(api_key=api_key))
         return self._ark_client
 
     @property
