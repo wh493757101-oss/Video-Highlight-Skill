@@ -151,6 +151,7 @@ class ArkClient:
                         f"{self.config.base_url}/files",
                         headers={"Authorization": f"Bearer {self.config.api_key}"},
                         files={"file": (path.name, f, "application/octet-stream")},
+                        data={"purpose": "user_data"},
                         timeout=self.config.timeout,
                     )
                     resp.raise_for_status()
