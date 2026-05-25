@@ -145,6 +145,7 @@ class ArkClient:
         with open(file_path, "rb") as f:
             last_error: str | None = None
             for attempt in range(self.config.max_retries):
+                f.seek(0)
                 try:
                     resp = httpx.post(
                         f"{self.config.base_url}/files",

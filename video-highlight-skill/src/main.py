@@ -78,7 +78,7 @@ class VideoHighlightPipeline:
         try:
             return self._run_impl(source, description, asr_text, skip_edit)
         except Exception as e:
-            logger.error("Pipeline 执行失败: %s", e)
+            logger.error("Pipeline 执行失败: %s", e, exc_info=True)
             return PipelineResult(
                 metadata=VideoMetadata(path="", duration=0, fps=0, width=0, height=0),
                 detection=DetectionResult(source="error"),

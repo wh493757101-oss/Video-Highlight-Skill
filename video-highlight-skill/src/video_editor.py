@@ -8,6 +8,7 @@ from typing import Any
 
 from .las_client import LasClient, LasConfig
 from .rule_engine import HighlightSegment
+from .video_fetcher import _get_ffmpeg
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ class VideoEditor:
             clip_path = str(output_dir / f"clip_{i:03d}.mp4")
             duration = seg.end_time - seg.start_time
             cmd = [
-                "ffmpeg", "-y",
+                _get_ffmpeg(), "-y",
                 "-ss", str(seg.start_time),
                 "-i", video_path,
                 "-t", str(duration),
@@ -157,7 +158,7 @@ class VideoEditor:
 
         output_path = str(output_dir / "highlight_reel.mp4")
         cmd = [
-            "ffmpeg", "-y",
+            _get_ffmpeg(), "-y",
             "-f", "concat",
             "-safe", "0",
             "-i", str(concat_file),

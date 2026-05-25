@@ -21,6 +21,9 @@ video-highlight-skill/evaluation/test_cases/
 # ClawHub SDK 本地副本
 ClawHub/
 
+# 视频数据桶（不上传）
+video-highlight-bucket/
+
 # Claude Code 项目指引（不上传）
 CLAUDE.md
 

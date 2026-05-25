@@ -77,10 +77,15 @@ class VisualAnalyzer:
             frame = cv2.imread(path)
             if frame is None:
                 scores.append(0.0)
-                prev_gray = None
                 continue
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if frame.ndim == 3 and frame.shape[2] == 3:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            elif frame.ndim == 2:
+                gray = frame
+            else:
+                scores.append(0.0)
+                continue
 
             frame_score = 0.0
 
@@ -156,10 +161,13 @@ class RuleEngine:
         else:
             visual_resampled = np.zeros(target_len)
 
-        return (
-            self.config.audio_weight * audio_resampled
-            + self.config.visual_weight * visual_resampled
-        )
+        # 无音频时提高视觉权重，避免全零分数导致无输出
+        audio_w = self.config.audio_weight if len(audio_scores) > 0 else 0.0
+        visual_w = self.config.visual_weight if len(visual_scores) > 0 else 0.0
+        total_w = audio_w + visual_w
+        if total_w == 0:
+            return np.zeros(target_len)
+        return (audio_w * audio_resampled + visual_w * visual_resampled) / total_w
 
     def _extract_segments(
         self, scores: np.ndarray, duration: float

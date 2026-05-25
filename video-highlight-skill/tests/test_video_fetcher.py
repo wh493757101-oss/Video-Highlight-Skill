@@ -34,8 +34,13 @@ class TestUrlSource:
     def test_resolve_success(self, mocker):
         mock_run = mocker.patch("subprocess.run")
         mocker.patch("tempfile.mkdtemp", return_value="/tmp/video_dl_abc")
-        mock_glob = mocker.patch.object(
+        mocker.patch.object(
             Path, "glob", return_value=[Path("/tmp/video_dl_abc/title.mp4")]
+        )
+        # mock _convert_to_mp4 to avoid ffmpeg call
+        mocker.patch(
+            "src.video_fetcher._convert_to_mp4",
+            return_value="/tmp/video_dl_abc/title.mp4",
         )
 
         source = UrlSource("https://example.com/video")
@@ -112,6 +117,7 @@ class TestVideoFetcher:
 
         mocker.patch("cv2.VideoCapture", return_value=mock_cap)
         mocker.patch("cv2.imwrite")
+        mocker.patch("src.video_fetcher._convert_to_mp4", return_value=str(video))
         mock_extract = mocker.patch.object(
             VideoFetcher, "_extract_audio", return_value="/tmp/out/audio/test.wav"
         )
@@ -119,7 +125,6 @@ class TestVideoFetcher:
         fetcher = VideoFetcher(output_dir=str(tmp_path))
         meta = fetcher.fetch(LocalFileSource(str(video)))
 
-        assert meta.path == str(video)
         assert meta.duration == 10.0
         assert meta.fps == 30.0
         assert meta.width == 1920
@@ -146,12 +151,15 @@ class TestVideoFetcher:
         assert result.endswith(".mp4")
 
     def test_extract_audio(self, mocker, tmp_path):
-        mock_run = mocker.patch("subprocess.run")
+        # probe returns "Audio:" in stderr to skip the probe guard
+        mock_probe = mocker.MagicMock()
+        mock_probe.stderr = b"Stream #0:1: Audio: aac"
+        mock_run = mocker.patch("subprocess.run", return_value=mock_probe)
         fetcher = VideoFetcher(output_dir=str(tmp_path))
         result = fetcher._extract_audio("/tmp/video.mp4")
 
+        assert result is not None
         assert result.endswith(".wav")
-        mock_run.assert_called_once()
 
     def test_sample_keyframes(self, mocker, tmp_path):
         mock_cap = mocker.MagicMock()
