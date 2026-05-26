@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EditorConfig:
     output_dir: str = ""
-    las_operator_id: str = "las_video_edit"
+    las_operator_id: str = field(default_factory=lambda: os.environ.get("LAS_OPERATOR_ID", "las_video_edit"))
     las_operator_version: str = "v1"
     output_tos_path: str = ""
     transition_duration: float = 0.5
