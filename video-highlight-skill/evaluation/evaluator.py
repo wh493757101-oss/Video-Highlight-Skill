@@ -53,6 +53,10 @@ class CostStats:
     total_elapsed: float = 0.0
     avg_elapsed: float = 0.0
     processing_ratio: float = 0.0
+    memory_peak_mb: float = 0.0
+    memory_avg_mb: float = 0.0
+    concurrent_throughput: float = 0.0
+    concurrency: int = 0
 
 
 @dataclass
@@ -349,6 +353,8 @@ class HighlightEvaluator:
         total_elapsed = 0.0
         api_calls = 0
         api_retries = 0
+        memory_peaks: list[float] = []
+        memory_avgs: list[float] = []
         for r in results:
             usage = r.get("usage", {})
             total_prompt += usage.get("prompt_tokens", 0)
@@ -357,12 +363,20 @@ class HighlightEvaluator:
             total_elapsed += r.get("elapsed_time", 0.0)
             api_calls += r.get("api_calls", 0)
             api_retries += r.get("api_retries", 0)
+            mem_peak = r.get("memory_peak_mb", 0.0)
+            mem_avg = r.get("memory_avg_mb", 0.0)
+            if mem_peak > 0:
+                memory_peaks.append(mem_peak)
+            if mem_avg > 0:
+                memory_avgs.append(mem_avg)
 
         total_tokens = total_prompt + total_completion
         tokens_per_minute = total_tokens / (total_duration / 60.0) if total_duration > 0 else 0.0
         n = len(results) or 1
         avg_elapsed = total_elapsed / n
         processing_ratio = total_elapsed / total_duration if total_duration > 0 else 0.0
+        memory_peak_mb = max(memory_peaks) if memory_peaks else 0.0
+        memory_avg_mb = sum(memory_avgs) / len(memory_avgs) if memory_avgs else 0.0
 
         return CostStats(
             total_tokens=total_tokens,
@@ -375,6 +389,10 @@ class HighlightEvaluator:
             total_elapsed=total_elapsed,
             avg_elapsed=avg_elapsed,
             processing_ratio=processing_ratio,
+            memory_peak_mb=memory_peak_mb,
+            memory_avg_mb=memory_avg_mb,
+            concurrent_throughput=results[0].get("concurrent_throughput", 0.0) if results else 0.0,
+            concurrency=results[0].get("concurrency", 0) if results else 0,
         )
 
 

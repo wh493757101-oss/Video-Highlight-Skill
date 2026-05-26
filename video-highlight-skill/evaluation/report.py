@@ -61,6 +61,12 @@ class ReportGenerator:
         lines.append(f"  总处理耗时:        {eval_report.cost.total_elapsed:.1f}s")
         lines.append(f"  平均耗时/case:     {eval_report.cost.avg_elapsed:.1f}s")
         lines.append(f"  处理倍速:          {eval_report.cost.processing_ratio:.2f}x")
+        if eval_report.cost.memory_peak_mb > 0:
+            lines.append(f"  内存峰值:          {eval_report.cost.memory_peak_mb:.1f} MB")
+            lines.append(f"  内存均值:          {eval_report.cost.memory_avg_mb:.1f} MB")
+        if eval_report.cost.concurrency > 1:
+            lines.append(f"  并发度:            {eval_report.cost.concurrency}")
+            lines.append(f"  并发吞吐量:        {eval_report.cost.concurrent_throughput:.2f} case/s")
         lines.append("")
 
         if eval_report.by_category:
@@ -188,6 +194,10 @@ class ReportGenerator:
                     "total_elapsed": round(eval_report.cost.total_elapsed, 1),
                     "avg_elapsed": round(eval_report.cost.avg_elapsed, 1),
                     "processing_ratio": round(eval_report.cost.processing_ratio, 2),
+                    "memory_peak_mb": round(eval_report.cost.memory_peak_mb, 1),
+                    "memory_avg_mb": round(eval_report.cost.memory_avg_mb, 1),
+                    "concurrency": eval_report.cost.concurrency,
+                    "concurrent_throughput": round(eval_report.cost.concurrent_throughput, 2),
                 },
                 "degradation_rate": round(eval_report.degradation_rate, 3),
                 "by_category": {
