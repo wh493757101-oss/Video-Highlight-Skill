@@ -2,11 +2,18 @@
 import os
 import sys
 import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
 logger = logging.getLogger("verify")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+if _ENV_FILE.exists():
+    load_dotenv(_ENV_FILE)
 
 
 def check_env():
