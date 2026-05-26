@@ -195,11 +195,11 @@ def test_judge_scoring():
         print(f"  [FAIL] {score.error}")
         return False
 
-    print(f"  Rhythm:           {score.rhythm}/5.0")
-    print(f"  Completeness:     {score.completeness}/5.0")
-    print(f"  Excitement:       {score.excitement}/5.0")
-    print(f"  Instruction Fit:  {score.instruction_fit}/5.0")
-    print(f"  Average:          {score.average:.1f}/5.0")
+    print(f"  Rhythm:           {score.rhythm}/10.0")
+    print(f"  Completeness:     {score.completeness}/10.0")
+    print(f"  Excitement:       {score.excitement}/10.0")
+    print(f"  Instruction Fit:  {score.instruction_fit}/10.0")
+    print(f"  Average:          {score.average:.1f}/10.0")
     print(f"  Comment:          {score.overall_comment}")
     print(f"  [PASS] LLM Judge scoring OK")
     return True

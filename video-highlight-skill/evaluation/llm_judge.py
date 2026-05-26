@@ -163,22 +163,22 @@ class LLMJudge:
         n_frames = min(max_frames, frame_count)
         interval = max(duration / n_frames, 0.5)
 
-        tmpdir = tempfile.mkdtemp(prefix="judge_frames_")
-        paths: list[str] = []
-        frame_idx = 0
-        saved = 0
-        while saved < n_frames and frame_idx < frame_count:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            ret, frame = cap.read()
-            if ret:
-                frame_path = str(Path(tmpdir) / f"judge_{saved:03d}.jpg")
-                cv2.imwrite(frame_path, frame)
-                paths.append(frame_path)
-                saved += 1
-            frame_idx += max(1, int(interval * fps))
+        with tempfile.TemporaryDirectory(prefix="judge_frames_") as tmpdir:
+            paths: list[str] = []
+            frame_idx = 0
+            saved = 0
+            while saved < n_frames and frame_idx < frame_count:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                if ret:
+                    frame_path = str(Path(tmpdir) / f"judge_{saved:03d}.jpg")
+                    cv2.imwrite(frame_path, frame)
+                    paths.append(frame_path)
+                    saved += 1
+                frame_idx += max(1, int(interval * fps))
 
-        cap.release()
-        return paths
+            cap.release()
+            return paths
 
     def judge(
         self,

@@ -23,8 +23,7 @@ def _get_ffmpeg() -> str:
     if _FFMPEG_PATH:
         return _FFMPEG_PATH
     for candidate in [
-        "ffmpeg",
-        shutil.which("ffmpeg") or "",
+        shutil.which("ffmpeg") or shutil.which("ffmpeg.exe") or "",
     ]:
         if candidate and Path(candidate).exists():
             _FFMPEG_PATH = candidate
@@ -46,9 +45,7 @@ def _get_ytdlp() -> str:
     if _YT_DLP_PATH:
         return _YT_DLP_PATH
     for candidate in [
-        "yt-dlp",
-        shutil.which("yt-dlp") or "",
-        shutil.which("yt-dlp.exe") or "",
+        shutil.which("yt-dlp") or shutil.which("yt-dlp.exe") or "",
     ]:
         if candidate and Path(candidate).exists():
             _YT_DLP_PATH = candidate
@@ -273,6 +270,15 @@ class VideoFetcher:
         needs_transcode = not can_decode or file_path.suffix.lower() != ".mp4"
         if needs_transcode:
             video_path = _convert_to_mp4(video_path, self.output_dir)
+            # 转码后重读元数据，确保 duration/fps/width/height 准确
+            cap2 = cv2.VideoCapture(video_path)
+            if cap2.isOpened():
+                fps = cap2.get(cv2.CAP_PROP_FPS)
+                frame_count = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
+                width = int(cap2.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(cap2.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                duration = frame_count / fps if fps > 0 else duration
+                cap2.release()
 
         # 提取音频
         audio_path = self._extract_audio(video_path)

@@ -124,7 +124,7 @@ class ReportGenerator:
                     lines.append(f"    #{i + 1}: [ERROR] {score.error}")
                 else:
                     lines.append(
-                        f"    #{i + 1}: {score.average:.1f}/5.0 — {score.overall_comment}"
+                        f"    #{i + 1}: {score.average:.1f}/10.0 — {score.overall_comment}"
                     )
 
         # 加权总分
@@ -342,7 +342,7 @@ class ReportGenerator:
             ax.set_xticks(x)
             ax.set_xticklabels(dims)
             ax.set_ylabel("Score")
-            ax.set_ylim(0, 5)
+            ax.set_ylim(0, 10)
             for i, v in enumerate(values):
                 ax.text(i, v + 0.1, f"{v:.1f}", ha="center")
 
