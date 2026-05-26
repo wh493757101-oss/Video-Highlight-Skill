@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -16,31 +15,32 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DetectorConfig:
-    frame_interval: float = 2.0
-    max_frames_per_batch: int = 16
+    frame_interval: float = 2.0       # 仅规则引擎降级路径使用
+    max_frames_per_batch: int = 16    # 仅规则引擎降级路径使用
     ark_model: str = field(default_factory=lambda: os.environ.get("ARK_HIGHLIGHT_MODEL", ""))
     ark_temperature: float = 0.3
     ark_max_tokens: int = 4096
     fallback_enabled: bool = True
 
 
-HIGHLIGHT_PROMPT = """你是一个专业的视频高光检测分析器。请分析以下视频帧序列（按时间顺序排列，每帧间隔约 {interval} 秒），识别出最精彩的高光片段。
+HIGHLIGHT_PROMPT = """你是一个专业的视频高光检测分析器。请完整观看以下视频（包含画面和音频），识别出最精彩的高光片段。
 
-视频总时长: {duration} 秒，共 {frame_count} 帧。
+视频总时长: {duration:.1f} 秒。
 
-请根据以下维度判断高光片段：
-1. 画面变化：场景切换、运动强度、视觉冲击力
-2. 内容精彩度：关键动作、表情、事件
-3. 节奏感：画面变化的频率和幅度
+请根据以下维度综合判断高光片段：
+1. 画面内容：场景切换、运动强度、视觉冲击力、关键动作和表情
+2. 音频特征：音量变化、语速节奏、情绪爆发点、背景音乐高潮
+3. 内容精彩度：事件重要性、情绪张力、叙事节奏
+4. 音画配合：画面与音频的协调性和同步冲击力
+
+{asr_context}
 
 请以 JSON 格式返回结果，包含一个 segments 数组，每个元素包含：
 - start_time: 起始时间（秒）
 - end_time: 结束时间（秒）
-- label: 高光类型标签（如 "精彩动作", "关键场景", "情绪爆发", "转场亮点"）
+- label: 高光类型标签（如 "精彩动作", "关键场景", "情绪爆发", "转场亮点", "音频高潮"）
 - score: 精彩度评分（0.0-1.0）
 - reason: 简短理由（一句话）
-
-{asr_context}
 
 只返回 JSON，不要包含其他文字。"""
 
@@ -111,31 +111,24 @@ class HighlightDetector:
     def _detect_multimodal(
         self, metadata: VideoMetadata, asr_text: str
     ) -> DetectionResult:
-        if not metadata.frames_dir:
-            raise ValueError("frames_dir 为空，无法进行多模态检测")
-        frame_paths = sorted(Path(metadata.frames_dir).glob("*.jpg"))
-        if not frame_paths:
-            raise ValueError("没有可用的关键帧")
-
-        batch = frame_paths[: self.config.max_frames_per_batch]
-        interval = (
-            metadata.duration / len(frame_paths) if len(frame_paths) > 1 else self.config.frame_interval
-        )
+        if not metadata.path:
+            raise ValueError("视频路径为空，无法进行多模态检测")
+        video_path = Path(metadata.path)
+        if not video_path.exists():
+            raise FileNotFoundError(f"视频文件不存在: {metadata.path}，请检查文件路径后重试")
 
         asr_context = ""
         if asr_text:
             asr_context = f"视频 ASR 文本参考:\n{asr_text[:2000]}\n"
 
         prompt = HIGHLIGHT_PROMPT.format(
-            interval=f"{interval:.1f}",
-            duration=f"{metadata.duration:.1f}",
-            frame_count=len(batch),
+            duration=metadata.duration,
             asr_context=asr_context,
         )
 
-        response = self.ark_client.chat_with_images(
+        response = self.ark_client.chat_with_video(
             text=prompt,
-            image_paths=[str(p) for p in batch],
+            video_path=str(video_path),
             model=self.config.ark_model,
             temperature=self.config.ark_temperature,
             max_tokens=self.config.ark_max_tokens,

@@ -70,25 +70,18 @@ class TestHighlightDetector:
         monkeypatch.setenv("ARK_HIGHLIGHT_API_KEY", "test-key")
         monkeypatch.setenv("ARK_HIGHLIGHT_MODEL", "test-model")
         metadata = self._make_metadata(tmp_path)
+        video_file = Path(metadata.path)
+        video_file.write_bytes(b"fake mp4 content")
 
-        # 创建有效的 JPEG 帧文件
-        import cv2
-        frames_dir = Path(metadata.frames_dir)
-        for fp in frames_dir.glob("*.jpg"):
-            fp.unlink()
-        dummy_img = np.zeros((100, 100, 3), dtype=np.uint8)
-        for i in range(5):
-            cv2.imwrite(str(frames_dir / f"frame_{i:06d}.jpg"), dummy_img)
-
-        mock_response = {
+        mock_upload_result = {"download_url": "https://ark-cn-beijing.volces.com/dl/test"}
+        mock_chat_response = {
             "choices": [{"message": {"content": '{"segments": [{"start_time": 2.0, "end_time": 5.0, "label": "精彩动作", "score": 0.9, "reason": "画面变化剧烈"}]}'}}],
         }
-        mock_resp = mocker.MagicMock()
-        mock_resp.json.return_value = mock_response
-        mock_resp.raise_for_status = mocker.MagicMock()
-        mocker.patch("httpx.post", return_value=mock_resp)
 
         detector = HighlightDetector()
+        mocker.patch.object(detector.ark_client, "upload_file", return_value=mock_upload_result)
+        mocker.patch.object(detector.ark_client, "chat", return_value=mock_chat_response)
+
         result = detector.detect(metadata, asr_text="测试语音文本")
 
         assert result.source == "multimodal"
@@ -97,10 +90,9 @@ class TestHighlightDetector:
         assert result.segments[0].end_time == 5.0
         assert result.segments[0].combined_score == 0.9
 
-    def test_detect_multimodal_no_frames(self, mocker, tmp_path):
+    def test_detect_multimodal_no_video(self, mocker, tmp_path):
         metadata = self._make_metadata(tmp_path)
-        metadata.frames_dir = str(tmp_path / "empty_frames")
-        Path(metadata.frames_dir).mkdir()
+        metadata.path = str(tmp_path / "nonexistent.mp4")
 
         mock_rule = mocker.patch.object(
             HighlightDetector, "_detect_rule_based",

@@ -116,6 +116,52 @@ def test_highlight_multimodal():
         return False
 
 
+def test_highlight_video():
+    print("\n" + "=" * 60)
+    print("4. Highlight Detection Video (native video understanding)")
+    print("=" * 60)
+
+    import shutil
+    import subprocess
+    import tempfile
+
+    key = os.environ["ARK_HIGHLIGHT_API_KEY"]
+    model = os.environ["ARK_HIGHLIGHT_MODEL"]
+
+    tmpdir = tempfile.mkdtemp(prefix="verify_video_")
+    video_path = str(Path(tmpdir) / "test.mp4")
+    try:
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=320x240:d=1",
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p", video_path],
+                check=True, capture_output=True, timeout=30,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            print(f"  [SKIP] Cannot create test video: {e}")
+            return True
+
+        client = ArkClient(ArkConfig(api_key=key, model=model))
+        try:
+            response = client.chat_with_video(
+                text="Describe what you see in this video. Reply JSON: {\"description\": \"...\"}",
+                video_path=video_path,
+                temperature=0.1,
+                max_tokens=128,
+            )
+            content = response["choices"][0]["message"]["content"]
+            usage = response.get("usage", {})
+            print(f"  Response: {content[:120]}")
+            print(f"  Tokens:   prompt={usage.get('prompt_tokens')}, completion={usage.get('completion_tokens')}")
+            print(f"  [PASS] Highlight Video API OK")
+            return True
+        except Exception as e:
+            print(f"  [FAIL] {e}")
+            return False
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_las_health():
     print("\n" + "=" * 60)
     print("4. LAS API connectivity (health check via submit)")
@@ -220,7 +266,8 @@ def main():
         sys.exit(1)
 
     results["Highlight Chat"] = test_highlight_chat()
-    results["Highlight Multimodal"] = test_highlight_multimodal()
+    results["Highlight Multimodal (image)"] = test_highlight_multimodal()
+    results["Highlight Video (native)"] = test_highlight_video()
     results["LAS API"] = test_las_health()
     results["Judge Chat"] = test_judge_chat()
     results["Judge Scoring"] = test_judge_scoring()

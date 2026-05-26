@@ -237,12 +237,23 @@ class VideoFetcher:
         video_path = source.resolve()
         return self._preprocess(video_path)
 
+    # 短视频剪辑场景限制
+    MAX_DURATION_SECONDS = 300   # 5 分钟
+    MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500MB
+
     def _preprocess(self, video_path: str) -> VideoMetadata:
         file_path = Path(video_path)
         if not file_path.exists():
             raise FileNotFoundError(f"视频文件不存在: {video_path}，请检查文件路径后重试")
         if file_path.stat().st_size == 0:
             raise ValueError(f"视频文件为空（0 字节）: {video_path}，请检查视频源后重试")
+
+        file_size_mb = file_path.stat().st_size / (1024 * 1024)
+        if file_path.stat().st_size > self.MAX_FILE_SIZE_BYTES:
+            raise ValueError(
+                f"视频文件过大（{file_size_mb:.0f}MB），建议裁剪到 {self.MAX_FILE_SIZE_BYTES // (1024 * 1024)}MB 以内后重试。"
+                f" 提示: 5 分钟 1080p 视频约 200-500MB"
+            )
 
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -260,6 +271,11 @@ class VideoFetcher:
                 raise ValueError(f"无法解析视频参数: fps={fps}, duration={duration}, frames={frame_count}，请检查视频文件后重试")
             if frame_count == 0:
                 raise ValueError(f"视频文件中无视频帧: {video_path}，请检查视频源后重试")
+            if duration > self.MAX_DURATION_SECONDS:
+                raise ValueError(
+                    f"视频时长过长（{duration:.0f}s），当前限制 {self.MAX_DURATION_SECONDS}s（5 分钟）以内。"
+                    " 请裁剪视频后重试"
+                )
 
             # 检测 OpenCV 是否能实际解码帧（av1 等编码 isOpened() 返回 True 但 read() 失败）
             can_decode, _ = cap.read()

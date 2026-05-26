@@ -1,7 +1,7 @@
+import base64
 import json
 import logging
 import os
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,7 +37,7 @@ JUDGE_PROMPT_TEXT = """你是一个专业的视频剪辑质量评审员。请根
 
 只返回 JSON，不要包含其他文字。"""
 
-JUDGE_PROMPT_MULTIMODAL = """你是一个专业的视频剪辑质量评审员。请观看以下集锦视频的关键帧画面（按时间顺序排列），结合提供的原始视频信息和片段列表，对剪辑质量进行多维度评分。
+JUDGE_PROMPT_VIDEO = """你是一个专业的视频剪辑质量评审员。请完整观看以下集锦视频（包含画面和音频），结合提供的原始视频信息和片段列表，对剪辑质量进行多维度评分。
 
 ## 原始视频信息
 - 视频类型: {category}
@@ -49,9 +49,9 @@ JUDGE_PROMPT_MULTIMODAL = """你是一个专业的视频剪辑质量评审员。
 
 ## 评分维度（每项 1-10 分）
 
-1. **节奏感** — 画面衔接是否流畅，节奏是否符合风格要求，转场是否自然
-2. **内容完整性** — 每个高光片段是否完整表达了关键内容，是否有截断感
-3. **精彩程度** — 选中的画面是否真正精彩，视觉冲击力如何，色彩和构图是否吸引人
+1. **节奏感** — 画面衔接是否流畅，转场是否自然，BGM 与画面的配合度
+2. **内容完整性** — 每个高光片段是否完整表达了关键内容，音频是否自然过渡
+3. **精彩程度** — 选中的画面是否真正精彩，音频高潮是否与画面同步
 4. **指令契合度** — 剪辑结果是否符合用户的剪辑目标和要求
 
 请以 JSON 格式返回评分结果：
@@ -139,47 +139,6 @@ class LLMJudge:
             segments="\n".join(segment_lines) if segment_lines else "无",
         )
 
-    def _sample_frames(self, video_path: str, max_frames: int = 16) -> list[str]:
-        """从视频中均匀抽取关键帧，返回图片路径列表。"""
-        try:
-            import cv2
-        except ImportError:
-            logger.warning("opencv-python 未安装，无法抽帧")
-            return []
-
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            logger.warning("无法打开视频进行抽帧: %s", video_path)
-            return []
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 0
-
-        if duration <= 0 or frame_count <= 0:
-            cap.release()
-            return []
-
-        n_frames = min(max_frames, frame_count)
-        interval = max(duration / n_frames, 0.5)
-
-        with tempfile.TemporaryDirectory(prefix="judge_frames_") as tmpdir:
-            paths: list[str] = []
-            frame_idx = 0
-            saved = 0
-            while saved < n_frames and frame_idx < frame_count:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = cap.read()
-                if ret:
-                    frame_path = str(Path(tmpdir) / f"judge_{saved:03d}.jpg")
-                    cv2.imwrite(frame_path, frame)
-                    paths.append(frame_path)
-                    saved += 1
-                frame_idx += max(1, int(interval * fps))
-
-            cap.release()
-            return paths
-
     def judge(
         self,
         category: str,
@@ -190,10 +149,35 @@ class LLMJudge:
         max_retries: int = 3,
     ) -> JudgeScore:
         if video_path and Path(video_path).exists():
-            return self._judge_multimodal(category, target, style, segments, video_path, max_retries)
+            return self._judge_video(category, target, style, segments, video_path, max_retries)
         return self._judge_text_only(category, target, style, segments, max_retries)
 
-    def _judge_multimodal(
+    def _resolve_video_url(self, video_path: str) -> str:
+        """将本地视频路径转为模型可访问的 URL。
+
+        - Ark 后端: 上传到 Files API，返回 download_url
+        - DashScope 后端: 转 base64 data URI
+        - 已经是 URL: 直接返回
+        """
+        if video_path.startswith(("http://", "https://", "tos://", "data:")):
+            return video_path
+
+        path = Path(video_path)
+        if "dashscope" in self.config.base_url:
+            with open(path, "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+            return f"data:video/mp4;base64,{data}"
+        else:
+            result = self.ark_client.upload_file(str(path))
+            download_url = result.get("download_url", "")
+            if not download_url:
+                raise RuntimeError(
+                    "Files API 未返回 download_url: "
+                    f"{json.dumps(result, ensure_ascii=False)[:200]}"
+                )
+            return download_url
+
+    def _judge_video(
         self,
         category: str,
         target: str,
@@ -211,32 +195,41 @@ class LLMJudge:
                 f" (精彩度: {seg.get('score', 0):.2f}){label_str}"
             )
 
-        prompt = JUDGE_PROMPT_MULTIMODAL.format(
+        prompt = JUDGE_PROMPT_VIDEO.format(
             category=category,
             target=target or "精彩集锦",
             style=style or "无特定要求",
             segments="\n".join(segment_lines) if segment_lines else "无",
         )
 
-        frame_paths = self._sample_frames(video_path)
-        if not frame_paths:
-            logger.warning("视频抽帧失败，降级到纯文本 Judge")
-            return self._judge_text_only(category, target, style, segments, max_retries)
-
-        logger.info("LLM Judge 多模态评分: %d 帧, 视频=%s", len(frame_paths), video_path)
+        video_url = self._resolve_video_url(video_path)
+        logger.info("LLM Judge 视频评分: %s", video_path)
 
         last_error: str = ""
         for attempt in range(max_retries):
             try:
-                response = self.ark_client.chat_with_images(
-                    text=prompt,
-                    image_paths=frame_paths,
-                    model=self.config.model,
-                    temperature=0.3,
-                    max_tokens=1024,
-                )
+                if "dashscope" in self.config.base_url:
+                    response = self.ark_client.chat_with_video_omni(
+                        text=prompt,
+                        video_url=video_url,
+                        model=self.config.model,
+                        temperature=0.3,
+                        max_tokens=1024,
+                    )
+                else:
+                    response = self.ark_client.chat(
+                        messages=[{
+                            "role": "user",
+                            "content": [
+                                {"type": "video_url", "video_url": {"url": video_url}},
+                                {"type": "text", "text": prompt},
+                            ],
+                        }],
+                        model=self.config.model,
+                        temperature=0.3,
+                        max_tokens=1024,
+                    )
                 parsed = self.ark_client.extract_json(response)
-
                 return JudgeScore(
                     rhythm=float(parsed.get("节奏感", 0)),
                     completeness=float(parsed.get("内容完整性", 0)),
@@ -247,12 +240,12 @@ class LLMJudge:
             except Exception as e:
                 last_error = str(e)
                 if attempt < max_retries - 1:
-                    logger.warning("LLM Judge 多模态评分失败（第 %d/%d 次）: %s，重试中...", attempt + 1, max_retries, e)
+                    logger.warning("LLM Judge 视频评分失败（第 %d/%d 次）: %s，重试中...", attempt + 1, max_retries, e)
                     time.sleep(1)
                     continue
-                logger.warning("LLM Judge 多模态评分失败（已重试 %d 次）: %s", max_retries, last_error)
+                logger.warning("LLM Judge 视频评分失败（已重试 %d 次）: %s", max_retries, last_error)
 
-        logger.warning("多模态 Judge 全部失败，降级到纯文本 Judge")
+        logger.warning("视频 Judge 全部失败，降级到纯文本 Judge")
         return self._judge_text_only(category, target, style, segments, max_retries)
 
     def _judge_text_only(
@@ -263,6 +256,9 @@ class LLMJudge:
         segments: list[dict[str, Any]],
         max_retries: int,
     ) -> JudgeScore:
+        if max_retries < 1:
+            raise ValueError(f"max_retries 必须 >= 1，当前值: {max_retries}")
+
         prompt = self.build_prompt(category, target, style, segments)
 
         last_error: str = ""

@@ -21,6 +21,7 @@ class ArkConfig:
     model: str = "doubao-seed-2-0-pro"
     max_retries: int = 3
     timeout: float = 120.0
+    upload_timeout: float = 300.0
 
 
 def _encode_image(image_path: str) -> str:
@@ -119,6 +120,126 @@ class ArkClient:
             response_format=response_format,
         )
 
+    def chat_with_video(
+        self,
+        text: str,
+        video_path: str,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        response_format: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        file_obj = self.upload_file(video_path)
+        download_url: str = file_obj.get("download_url", "")
+        if not download_url:
+            raise RuntimeError(
+                "Files API 未返回 download_url，无法构建视频消息。"
+                f" 返回数据: {json.dumps(file_obj, ensure_ascii=False)[:200]}"
+            )
+
+        content: list[dict[str, Any]] = [
+            {"type": "video_url", "video_url": {"url": download_url}},
+            {"type": "text", "text": text},
+        ]
+        messages = [{"role": "user", "content": content}]
+        return self.chat(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        )
+
+    def chat_with_video_omni(
+        self,
+        text: str,
+        video_url: str,
+        model: str | None = None,
+        modalities: list[str] | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 4096,
+        response_format: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """DashScope Qwen-Omni 视频+音频调用（stream + modalities）。
+
+        video_url 可以是 HTTPS URL 或 base64 data URI（data:video/mp4;base64,...）。
+        返回格式与 chat() 一致：{"choices": [{"message": {"content": "..."}}], "usage": {...}}。
+        """
+        if modalities is None:
+            modalities = ["text"]
+
+        content: list[dict[str, Any]] = [
+            {"type": "video_url", "video_url": {"url": video_url}},
+            {"type": "text", "text": text},
+        ]
+        messages = [{"role": "user", "content": content}]
+
+        model_id = model or self.config.model
+        body: dict[str, Any] = {
+            "model": model_id,
+            "messages": messages,
+            "modalities": modalities,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if "audio" in modalities:
+            body["audio"] = {"voice": "Tina", "format": "wav"}
+        if response_format:
+            body["response_format"] = response_format
+
+        self.call_count += 1
+        last_error: str | None = None
+        for attempt in range(self.config.max_retries):
+            if attempt > 0:
+                self.retry_count += 1
+            try:
+                collected_text: str = ""
+                collected_usage: dict[str, int] = {}
+                with httpx.stream(
+                    "POST",
+                    f"{self.config.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=body,
+                    timeout=self.config.timeout,
+                ) as resp:
+                    resp.raise_for_status()
+                    for line in resp.iter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        if delta.get("content"):
+                            collected_text += delta["content"]
+                        usage = chunk.get("usage", {})
+                        if usage:
+                            collected_usage = usage
+                return {
+                    "choices": [{"message": {"content": collected_text, "role": "assistant"}}],
+                    "usage": collected_usage,
+                }
+            except httpx.HTTPStatusError as e:
+                last_error = f"HTTP {e.response.status_code}: {e.response.text}"
+                if e.response.status_code == 429:
+                    time.sleep(min(2 ** attempt, 30))
+                    continue
+                raise
+            except httpx.RequestError as e:
+                last_error = str(e)
+                if attempt < self.config.max_retries - 1:
+                    time.sleep(1)
+                    continue
+                raise
+
+        raise RuntimeError(f"Ark/Omni API 调用失败（已重试 {self.config.max_retries} 次）: {last_error}")
+
     def extract_json(self, response: dict[str, Any]) -> dict[str, Any]:
         content = response.get("choices", [{}])[0].get("message", {}).get("content", "")
         usage = response.get("usage", {})
@@ -157,7 +278,7 @@ class ArkClient:
                         headers={"Authorization": f"Bearer {self.config.api_key}"},
                         files={"file": (path.name, f, "application/octet-stream")},
                         data={"purpose": "user_data"},
-                        timeout=self.config.timeout,
+                        timeout=self.config.upload_timeout,
                     )
                     resp.raise_for_status()
                     return resp.json()
