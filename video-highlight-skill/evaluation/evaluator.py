@@ -407,7 +407,7 @@ def compute_weighted_score(
     degraded = getattr(judge_report, "degraded", False)
 
     if not degraded and hasattr(judge_report, "overall_average") and judge_report.overall_average > 0:
-        judge_normalized = judge_report.overall_average / 5.0
+        judge_normalized = judge_report.overall_average / 10.0
 
     if degraded:
         weighted = eval_score

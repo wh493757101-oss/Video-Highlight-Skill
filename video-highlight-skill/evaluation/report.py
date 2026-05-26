@@ -111,11 +111,11 @@ class ReportGenerator:
         if hasattr(judge_report, 'degraded') and judge_report.degraded:
             lines.append("  [降级] LLM Judge 不可用，已降级为纯量化评测")
         elif hasattr(judge_report, 'overall_average'):
-            lines.append(f"  节奏感:       {judge_report.overall_rhythm:.2f} / 5.0")
-            lines.append(f"  内容完整性:   {judge_report.overall_completeness:.2f} / 5.0")
-            lines.append(f"  精彩程度:     {judge_report.overall_excitement:.2f} / 5.0")
-            lines.append(f"  指令契合度:   {judge_report.overall_instruction_fit:.2f} / 5.0")
-            lines.append(f"  综合均分:     {judge_report.overall_average:.2f} / 5.0")
+            lines.append(f"  节奏感:       {judge_report.overall_rhythm:.2f} / 10.0")
+            lines.append(f"  内容完整性:   {judge_report.overall_completeness:.2f} / 10.0")
+            lines.append(f"  精彩程度:     {judge_report.overall_excitement:.2f} / 10.0")
+            lines.append(f"  指令契合度:   {judge_report.overall_instruction_fit:.2f} / 10.0")
+            lines.append(f"  综合均分:     {judge_report.overall_average:.2f} / 10.0")
 
             lines.append("")
             lines.append("  各用例 LLM 评价:")

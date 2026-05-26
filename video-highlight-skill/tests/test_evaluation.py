@@ -275,7 +275,7 @@ class TestLLMJudge:
             overall_average=4.25,
         )
         formatted = format_judge_report(report)
-        assert "4.00 / 5.0" in formatted
+        assert "4.00 / 10.0" in formatted
         assert "剪辑质量优秀" in formatted
 
     def test_format_judge_report_with_error(self):
@@ -639,8 +639,8 @@ class TestWeightedScore:
 
         result = compute_weighted_score(eval_report, judge_report)
         assert result["eval_score"] == 1.0
-        assert result["judge_score"] == 0.8
-        assert result["weighted_score"] == 0.9
+        assert result["judge_score"] == pytest.approx(0.4)
+        assert result["weighted_score"] == pytest.approx(0.7)
         assert result["degraded"] is False
 
     def test_degraded(self):
@@ -676,12 +676,12 @@ class TestWeightedScore:
             },
         ])
         judge_report = JudgeReport(
-            scores=[JudgeScore(rhythm=5.0, completeness=5.0, excitement=5.0, instruction_fit=5.0)],
-            overall_rhythm=5.0,
-            overall_completeness=5.0,
-            overall_excitement=5.0,
-            overall_instruction_fit=5.0,
-            overall_average=5.0,
+            scores=[JudgeScore(rhythm=10.0, completeness=10.0, excitement=10.0, instruction_fit=10.0)],
+            overall_rhythm=10.0,
+            overall_completeness=10.0,
+            overall_excitement=10.0,
+            overall_instruction_fit=10.0,
+            overall_average=10.0,
         )
 
         result = compute_weighted_score(eval_report, judge_report, weight_eval=0.6, weight_judge=0.4)
@@ -771,13 +771,13 @@ class TestReportWithWeightedScore:
             overall_instruction_fit=4.0,
             overall_average=4.25,
         )
-        weighted = {"eval_score": 1.0, "judge_score": 0.85, "weighted_score": 0.925, "degraded": False}
+        weighted = {"eval_score": 1.0, "judge_score": 0.425, "weighted_score": 0.7125, "degraded": False}
 
         gen = ReportGenerator(ReportConfig(output_dir=str(tmp_path), save_charts=False))
         text = gen.generate(eval_report, judge_report, weighted)
 
         assert "加权总分" in text
-        assert "0.9250" in text
+        assert "0.7125" in text
 
     def test_generate_with_degraded_weighted(self, tmp_path):
         evaluator = HighlightEvaluator()
@@ -820,7 +820,7 @@ class TestReportWithWeightedScore:
             overall_instruction_fit=4.0,
             overall_average=4.25,
         )
-        weighted = {"eval_score": 1.0, "judge_score": 0.85, "weighted_score": 0.925, "degraded": False}
+        weighted = {"eval_score": 1.0, "judge_score": 0.425, "weighted_score": 0.7125, "degraded": False}
 
         gen = ReportGenerator(ReportConfig(output_dir=str(tmp_path), save_charts=False))
         gen.generate(eval_report, judge_report, weighted)
@@ -828,5 +828,5 @@ class TestReportWithWeightedScore:
         json_path = tmp_path / "report.json"
         data = json.loads(json_path.read_text(encoding="utf-8"))
         assert "weighted_score" in data
-        assert data["weighted_score"]["weighted_score"] == 0.925
+        assert data["weighted_score"]["weighted_score"] == 0.7125
         assert data["llm_judge"]["degraded"] is False
