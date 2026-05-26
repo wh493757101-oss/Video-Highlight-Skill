@@ -39,6 +39,8 @@ class ArkClient:
         self.config = config or ArkConfig()
         if not self.config.api_key:
             raise ValueError("ARK_API_KEY 未设置，请通过环境变量或 ArkConfig 提供")
+        self.call_count: int = 0
+        self.retry_count: int = 0
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -64,7 +66,10 @@ class ArkClient:
             body["response_format"] = response_format
 
         last_error: str | None = None
+        self.call_count += 1
         for attempt in range(self.config.max_retries):
+            if attempt > 0:
+                self.retry_count += 1
             try:
                 resp = httpx.post(
                     f"{self.config.base_url}/chat/completions",

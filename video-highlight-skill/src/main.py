@@ -41,6 +41,7 @@ class PipelineResult:
     error: str | None = None
     session_dir: str = ""
     degradations: list[DegradationRecord] = field(default_factory=list)
+    elapsed_time: float = 0.0
 
 
 class VideoHighlightPipeline:
@@ -101,6 +102,7 @@ class VideoHighlightPipeline:
         asr_text: str = "",
         skip_edit: bool = False,
     ) -> PipelineResult:
+        t_start = time.time()
         degradations: list[DegradationRecord] = []
 
         metadata = self.fetcher.fetch(source)
@@ -154,6 +156,7 @@ class VideoHighlightPipeline:
         return PipelineResult(
             metadata=metadata, detection=detection, edit=edit, session_dir=session_dir,
             degradations=degradations,
+            elapsed_time=time.time() - t_start,
         )
 
     def run_from_path(

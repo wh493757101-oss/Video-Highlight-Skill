@@ -18,7 +18,7 @@ class TestDetectorConfig:
         cfg = DetectorConfig()
         assert cfg.frame_interval == 2.0
         assert cfg.max_frames_per_batch == 16
-        assert cfg.ark_model == os.environ.get("ARK_HIGHLIGHT_MODEL", "doubao-seed-2-0-pro")
+        assert cfg.ark_model == os.environ.get("ARK_HIGHLIGHT_MODEL", "")
         assert cfg.fallback_enabled is True
 
     def test_custom(self):
@@ -67,7 +67,8 @@ class TestHighlightDetector:
         )
 
     def test_detect_multimodal_success(self, mocker, tmp_path, monkeypatch):
-        monkeypatch.setenv("ARK_API_KEY", "test-key")
+        monkeypatch.setenv("ARK_HIGHLIGHT_API_KEY", "test-key")
+        monkeypatch.setenv("ARK_HIGHLIGHT_MODEL", "test-model")
         metadata = self._make_metadata(tmp_path)
 
         # 创建有效的 JPEG 帧文件
@@ -206,7 +207,8 @@ class TestHighlightDetector:
         assert segments[0].combined_score == 0.8
 
     def test_ark_client_lazy_init(self, mocker, monkeypatch):
-        monkeypatch.setenv("ARK_API_KEY", "test-key")
+        monkeypatch.setenv("ARK_HIGHLIGHT_API_KEY", "test-key")
+        monkeypatch.setenv("ARK_HIGHLIGHT_MODEL", "test-model")
         mock_resp = mocker.MagicMock()
         mock_resp.json.return_value = {
             "choices": [{"message": {"content": '{"segments": []}'}}],

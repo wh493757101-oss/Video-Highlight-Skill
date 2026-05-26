@@ -38,6 +38,7 @@ class CaseScore:
     iou_distribution: dict[str, int] = field(default_factory=dict)
     matched_pairs: list[SegmentMatch] = field(default_factory=list)
     error: str | None = None
+    degraded: bool = False
 
 
 @dataclass
@@ -47,6 +48,11 @@ class CostStats:
     completion_tokens: int = 0
     video_duration: float = 0.0
     tokens_per_minute: float = 0.0
+    api_calls: int = 0
+    api_retries: int = 0
+    total_elapsed: float = 0.0
+    avg_elapsed: float = 0.0
+    processing_ratio: float = 0.0
 
 
 @dataclass
@@ -65,10 +71,12 @@ class EvalReport:
     exception_rate: float = 0.0
     exception_count: int = 0
     total_count: int = 0
+    degraded_count: int = 0
+    degradation_rate: float = 0.0
     cost: CostStats = field(default_factory=CostStats)
-    by_category: dict[str, dict[str, float]] = field(default_factory=dict)
-    by_difficulty: dict[str, dict[str, float]] = field(default_factory=dict)
-    by_source: dict[str, dict[str, float]] = field(default_factory=dict)
+    by_category: dict[str, dict[str, Any]] = field(default_factory=dict)
+    by_difficulty: dict[str, dict[str, Any]] = field(default_factory=dict)
+    by_source: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class HighlightEvaluator:
@@ -166,6 +174,7 @@ class HighlightEvaluator:
         category: str = "",
         difficulty: str = "",
         source_type: str = "local",
+        degraded: bool = False,
     ) -> CaseScore:
         if not ground_truth:
             return CaseScore(
@@ -221,6 +230,7 @@ class HighlightEvaluator:
             mae=mae,
             iou_distribution=iou_dist,
             matched_pairs=matches,
+            degraded=degraded,
         )
 
     def evaluate_all(self, results: list[dict[str, Any]]) -> EvalReport:
@@ -241,6 +251,12 @@ class HighlightEvaluator:
         cat_scores: dict[str, list[float]] = {}
         dif_scores: dict[str, list[float]] = {}
         src_scores: dict[str, list[float]] = {}
+        cat_deg_counts: dict[str, int] = {}
+        dif_deg_counts: dict[str, int] = {}
+        src_deg_counts: dict[str, int] = {}
+        cat_counts: dict[str, int] = {}
+        dif_counts: dict[str, int] = {}
+        src_counts: dict[str, int] = {}
 
         for r in results:
             score = self.score_case(
@@ -250,6 +266,7 @@ class HighlightEvaluator:
                 category=r.get("category", ""),
                 difficulty=r.get("difficulty", ""),
                 source_type=r.get("source_type", "local"),
+                degraded=r.get("degraded", False),
             )
             report.scores.append(score)
 
@@ -272,6 +289,13 @@ class HighlightEvaluator:
             cat_scores.setdefault(score.category, []).append(score.f1)
             dif_scores.setdefault(score.difficulty, []).append(score.f1)
             src_scores.setdefault(score.source_type, []).append(score.f1)
+            cat_counts[score.category] = cat_counts.get(score.category, 0) + 1
+            dif_counts[score.difficulty] = dif_counts.get(score.difficulty, 0) + 1
+            src_counts[score.source_type] = src_counts.get(score.source_type, 0) + 1
+            if score.degraded:
+                cat_deg_counts[score.category] = cat_deg_counts.get(score.category, 0) + 1
+                dif_deg_counts[score.difficulty] = dif_deg_counts.get(score.difficulty, 0) + 1
+                src_deg_counts[score.source_type] = src_deg_counts.get(score.source_type, 0) + 1
 
         n = len([s for s in report.scores if not s.error]) or 1
         report.overall_precision = total_precision / n
@@ -285,19 +309,34 @@ class HighlightEvaluator:
         report.exception_count = len([s for s in report.scores if s.error])
         report.total_count = len(report.scores)
         report.exception_rate = report.exception_count / report.total_count if report.total_count > 0 else 0.0
+        valid_scores = [s for s in report.scores if not s.error]
+        report.degraded_count = sum(1 for s in valid_scores if s.degraded)
+        report.degradation_rate = report.degraded_count / len(valid_scores) if valid_scores else 0.0
 
         report.cost = self._aggregate_costs(results)
 
         report.by_category = {
-            k: {"f1": sum(v) / len(v), "count": len(v)}
+            k: {
+                "f1": sum(v) / len(v),
+                "count": len(v),
+                "degradation_rate": cat_deg_counts.get(k, 0) / cat_counts.get(k, 1),
+            }
             for k, v in cat_scores.items()
         }
         report.by_difficulty = {
-            k: {"f1": sum(v) / len(v), "count": len(v)}
+            k: {
+                "f1": sum(v) / len(v),
+                "count": len(v),
+                "degradation_rate": dif_deg_counts.get(k, 0) / dif_counts.get(k, 1),
+            }
             for k, v in dif_scores.items()
         }
         report.by_source = {
-            k: {"f1": sum(v) / len(v) if v else 0.0, "count": len(v)}
+            k: {
+                "f1": sum(v) / len(v) if v else 0.0,
+                "count": len(v),
+                "degradation_rate": src_deg_counts.get(k, 0) / src_counts.get(k, 1) if src_counts.get(k, 0) > 0 else 0.0,
+            }
             for k, v in src_scores.items()
         }
 
@@ -307,14 +346,23 @@ class HighlightEvaluator:
         total_prompt = 0
         total_completion = 0
         total_duration = 0.0
+        total_elapsed = 0.0
+        api_calls = 0
+        api_retries = 0
         for r in results:
             usage = r.get("usage", {})
             total_prompt += usage.get("prompt_tokens", 0)
             total_completion += usage.get("completion_tokens", 0)
             total_duration += r.get("video_duration", 0.0)
+            total_elapsed += r.get("elapsed_time", 0.0)
+            api_calls += r.get("api_calls", 0)
+            api_retries += r.get("api_retries", 0)
 
         total_tokens = total_prompt + total_completion
         tokens_per_minute = total_tokens / (total_duration / 60.0) if total_duration > 0 else 0.0
+        n = len(results) or 1
+        avg_elapsed = total_elapsed / n
+        processing_ratio = total_elapsed / total_duration if total_duration > 0 else 0.0
 
         return CostStats(
             total_tokens=total_tokens,
@@ -322,6 +370,11 @@ class HighlightEvaluator:
             completion_tokens=total_completion,
             video_duration=total_duration,
             tokens_per_minute=tokens_per_minute,
+            api_calls=api_calls,
+            api_retries=api_retries,
+            total_elapsed=total_elapsed,
+            avg_elapsed=avg_elapsed,
+            processing_ratio=processing_ratio,
         )
 
 

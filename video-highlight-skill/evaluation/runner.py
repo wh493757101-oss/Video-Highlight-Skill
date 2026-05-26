@@ -139,6 +139,10 @@ class EvalRunner:
             "style": instruction.get("style", ""),
             "usage": usage,
             "video_duration": result.metadata.duration,
+            "elapsed_time": result.elapsed_time,
+            "degraded": result.detection.degraded,
+            "api_calls": self.pipeline.detector.call_count,
+            "api_retries": self.pipeline.detector.retry_count,
         }
 
     def _build_judge_cases(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:

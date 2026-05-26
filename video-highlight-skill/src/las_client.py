@@ -28,6 +28,8 @@ class LasClient:
         self.config = config or LasConfig()
         if not self.config.api_key:
             raise ValueError("LAS_API_KEY 未设置，请通过环境变量或 LasConfig 提供")
+        self.call_count: int = 0
+        self.retry_count: int = 0
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -42,7 +44,10 @@ class LasClient:
         operator_version: str = "v1",
     ) -> dict[str, Any]:
         last_error: str | None = None
+        self.call_count += 1
         for attempt in range(self.config.max_retries):
+            if attempt > 0:
+                self.retry_count += 1
             try:
                 resp = httpx.post(
                     f"{self.config.base_url}/submit",

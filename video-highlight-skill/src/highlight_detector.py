@@ -100,6 +100,14 @@ class HighlightDetector:
                     "高光检测失败（多模态和规则引擎均不可用），请稍后重试"
                 ) from e2
 
+    @property
+    def call_count(self) -> int:
+        return self.ark_client.call_count
+
+    @property
+    def retry_count(self) -> int:
+        return self.ark_client.retry_count
+
     def _detect_multimodal(
         self, metadata: VideoMetadata, asr_text: str
     ) -> DetectionResult:

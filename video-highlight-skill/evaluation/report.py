@@ -46,33 +46,43 @@ class ReportGenerator:
         lines.append(f"    合格 (≥0.5): {eval_report.iou_distribution.get('qualified', 0)}")
         lines.append(f"    不合格 (<0.5): {eval_report.iou_distribution.get('unqualified', 0)}")
         lines.append("")
-        lines.append(f"  异常率: {eval_report.exception_rate:.1%} ({eval_report.exception_count}/{eval_report.total_count})")
+        lines.append(f"  异常率:    {eval_report.exception_rate:.1%} ({eval_report.exception_count}/{eval_report.total_count})")
+        lines.append(f"  降级率:    {eval_report.degradation_rate:.1%} ({eval_report.degraded_count} cases)")
         lines.append("")
-        lines.append("## Token 效率")
+        lines.append("## 性能 & 成本")
         lines.append("")
-        lines.append(f"  总 Token:        {eval_report.cost.total_tokens:,}")
-        lines.append(f"  Prompt Token:    {eval_report.cost.prompt_tokens:,}")
-        lines.append(f"  Completion Token:{eval_report.cost.completion_tokens:,}")
-        lines.append(f"  视频总时长:      {eval_report.cost.video_duration:.1f}s")
-        lines.append(f"  Token/分钟:      {eval_report.cost.tokens_per_minute:,.0f}")
+        lines.append(f"  总 Token:          {eval_report.cost.total_tokens:,}")
+        lines.append(f"  Prompt Token:      {eval_report.cost.prompt_tokens:,}")
+        lines.append(f"  Completion Token:  {eval_report.cost.completion_tokens:,}")
+        lines.append(f"  API 调用次数:      {eval_report.cost.api_calls}")
+        lines.append(f"  API 重试次数:      {eval_report.cost.api_retries}")
+        lines.append(f"  视频总时长:        {eval_report.cost.video_duration:.1f}s")
+        lines.append(f"  Token/分钟:        {eval_report.cost.tokens_per_minute:,.0f}")
+        lines.append(f"  总处理耗时:        {eval_report.cost.total_elapsed:.1f}s")
+        lines.append(f"  平均耗时/case:     {eval_report.cost.avg_elapsed:.1f}s")
+        lines.append(f"  处理倍速:          {eval_report.cost.processing_ratio:.2f}x")
+        lines.append("")
 
         if eval_report.by_category:
             lines.append("")
             lines.append("  按视频类型:")
             for cat, stats in eval_report.by_category.items():
-                lines.append(f"    {cat}: F1={stats['f1']:.3f} (n={stats['count']})")
+                deg = stats.get("degradation_rate", 0.0)
+                lines.append(f"    {cat}: F1={stats['f1']:.3f}, 降级率={deg:.0%} (n={stats['count']})")
 
         if eval_report.by_difficulty:
             lines.append("")
             lines.append("  按难度:")
             for dif, stats in eval_report.by_difficulty.items():
-                lines.append(f"    {dif}: F1={stats['f1']:.3f} (n={stats['count']})")
+                deg = stats.get("degradation_rate", 0.0)
+                lines.append(f"    {dif}: F1={stats['f1']:.3f}, 降级率={deg:.0%} (n={stats['count']})")
 
         if eval_report.by_source:
             lines.append("")
             lines.append("  按来源:")
             for src, stats in eval_report.by_source.items():
-                lines.append(f"    {src}: F1={stats['f1']:.3f} (n={stats['count']})")
+                deg = stats.get("degradation_rate", 0.0)
+                lines.append(f"    {src}: F1={stats['f1']:.3f}, 降级率={deg:.0%} (n={stats['count']})")
 
         lines.append("")
         lines.append("  各用例详情:")
@@ -173,17 +183,35 @@ class ReportGenerator:
                     "completion_tokens": eval_report.cost.completion_tokens,
                     "video_duration": eval_report.cost.video_duration,
                     "tokens_per_minute": round(eval_report.cost.tokens_per_minute, 1),
+                    "api_calls": eval_report.cost.api_calls,
+                    "api_retries": eval_report.cost.api_retries,
+                    "total_elapsed": round(eval_report.cost.total_elapsed, 1),
+                    "avg_elapsed": round(eval_report.cost.avg_elapsed, 1),
+                    "processing_ratio": round(eval_report.cost.processing_ratio, 2),
                 },
+                "degradation_rate": round(eval_report.degradation_rate, 3),
                 "by_category": {
-                    k: {"f1": round(v["f1"], 3), "count": v["count"]}
+                    k: {
+                        "f1": round(v["f1"], 3),
+                        "count": v["count"],
+                        "degradation_rate": round(v.get("degradation_rate", 0), 3),
+                    }
                     for k, v in eval_report.by_category.items()
                 },
                 "by_difficulty": {
-                    k: {"f1": round(v["f1"], 3), "count": v["count"]}
+                    k: {
+                        "f1": round(v["f1"], 3),
+                        "count": v["count"],
+                        "degradation_rate": round(v.get("degradation_rate", 0), 3),
+                    }
                     for k, v in eval_report.by_difficulty.items()
                 },
                 "by_source": {
-                    k: {"f1": round(v["f1"], 3), "count": v["count"]}
+                    k: {
+                        "f1": round(v["f1"], 3),
+                        "count": v["count"],
+                        "degradation_rate": round(v.get("degradation_rate", 0), 3),
+                    }
                     for k, v in eval_report.by_source.items()
                 },
                 "cases": [
