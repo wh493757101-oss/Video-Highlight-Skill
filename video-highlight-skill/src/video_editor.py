@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 class EditorConfig:
     output_dir: str = ""
     las_operator_id: str = "las_video_edit"
+    las_operator_version: str = "v1"
+    output_tos_path: str = ""
     transition_duration: float = 0.5
     fallback_enabled: bool = True
 
@@ -84,7 +86,14 @@ class VideoEditor:
             "output_format": "mp4",
         }
 
-        result = self.las_client.submit(self.config.las_operator_id, task_input)
+        if self.config.output_tos_path:
+            task_input["output_tos_path"] = self.config.output_tos_path
+
+        result = self.las_client.submit(
+            self.config.las_operator_id,
+            task_input,
+            operator_version=self.config.las_operator_version,
+        )
         task_id = result.get("task_id", "")
         if not task_id:
             raise RuntimeError("LAS 未返回 task_id")

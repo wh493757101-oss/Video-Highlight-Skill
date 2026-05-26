@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class DetectorConfig:
     frame_interval: float = 2.0
     max_frames_per_batch: int = 16
-    ark_model: str = field(default_factory=lambda: os.environ.get("ARK_HIGHLIGHT_MODEL", "doubao-seed-2-0-pro"))
+    ark_model: str = field(default_factory=lambda: os.environ.get("ARK_HIGHLIGHT_MODEL", ""))
     ark_temperature: float = 0.3
     ark_max_tokens: int = 4096
     fallback_enabled: bool = True
@@ -68,8 +68,8 @@ class HighlightDetector:
     @property
     def ark_client(self) -> ArkClient:
         if self._ark_client is None:
-            api_key = os.environ.get("ARK_HIGHLIGHT_API_KEY", os.environ.get("ARK_API_KEY", ""))
-            self._ark_client = ArkClient(ArkConfig(api_key=api_key))
+            api_key = os.environ.get("ARK_HIGHLIGHT_API_KEY", "")
+            self._ark_client = ArkClient(ArkConfig(api_key=api_key, model=self.config.ark_model))
         return self._ark_client
 
     @property

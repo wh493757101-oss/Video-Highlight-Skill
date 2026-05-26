@@ -95,7 +95,8 @@ class JudgeReport:
 @dataclass
 class JudgeConfig:
     api_key: str = field(default_factory=lambda: os.environ.get("ARK_JUDGE_API_KEY", ""))
-    model: str = field(default_factory=lambda: os.environ.get("ARK_JUDGE_MODEL", "doubao-seed-2-0-lite"))
+    base_url: str = field(default_factory=lambda: os.environ.get("ARK_JUDGE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"))
+    model: str = field(default_factory=lambda: os.environ.get("ARK_JUDGE_MODEL", ""))
     max_retries: int = 3
 
 
@@ -108,8 +109,11 @@ class LLMJudge:
     def ark_client(self):
         if self._ark_client is None:
             from src.ark_client import ArkClient, ArkConfig
-            api_key = self.config.api_key if self.config.api_key else os.environ.get("ARK_API_KEY", "")
-            self._ark_client = ArkClient(ArkConfig(api_key=api_key))
+            self._ark_client = ArkClient(ArkConfig(
+                api_key=self.config.api_key,
+                base_url=self.config.base_url,
+                model=self.config.model,
+            ))
         return self._ark_client
 
     def build_prompt(

@@ -35,14 +35,23 @@ class LasClient:
             "Content-Type": "application/json",
         }
 
-    def submit(self, operator_id: str, task_input: dict[str, Any]) -> dict[str, Any]:
+    def submit(
+        self,
+        operator_id: str,
+        task_input: dict[str, Any],
+        operator_version: str = "v1",
+    ) -> dict[str, Any]:
         last_error: str | None = None
         for attempt in range(self.config.max_retries):
             try:
                 resp = httpx.post(
                     f"{self.config.base_url}/submit",
                     headers=self._headers(),
-                    json={"operator_id": operator_id, "input": task_input},
+                    json={
+                        "operator_id": operator_id,
+                        "operator_version": operator_version,
+                        "data": task_input,
+                    },
                     timeout=30.0,
                 )
                 resp.raise_for_status()
