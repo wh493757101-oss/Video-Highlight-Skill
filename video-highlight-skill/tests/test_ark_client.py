@@ -10,7 +10,7 @@ class TestArkConfig:
         config = ArkConfig(api_key="test-key")
         assert config.api_key == "test-key"
         assert config.base_url == "https://ark.cn-beijing.volces.com/api/v3"
-        assert config.model == os.environ.get("ARK_MODEL", "doubao-seed-2-0-pro")
+        assert config.model == os.environ.get("ARK_HIGHLIGHT_MODEL", "doubao-seed-2-0-pro")
         assert config.max_retries == 3
 
     def test_custom_config(self):
@@ -29,7 +29,7 @@ class TestArkConfig:
 class TestArkClient:
     def test_init_without_api_key_raises(self):
         config = ArkConfig(api_key="")
-        with pytest.raises(ValueError, match="ARK_API_KEY"):
+        with pytest.raises(ValueError, match="ARK_HIGHLIGHT_API_KEY"):
             ArkClient(config)
 
     def test_chat_success(self, mocker):

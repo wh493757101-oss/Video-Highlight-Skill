@@ -38,7 +38,7 @@ class ArkClient:
     def __init__(self, config: ArkConfig | None = None):
         self.config = config or ArkConfig()
         if not self.config.api_key:
-            raise ValueError("ARK_API_KEY 未设置，请通过环境变量或 ArkConfig 提供")
+            raise ValueError("ARK_HIGHLIGHT_API_KEY 未设置，请通过环境变量或 ArkConfig 提供")
         self.call_count: int = 0
         self.retry_count: int = 0
 

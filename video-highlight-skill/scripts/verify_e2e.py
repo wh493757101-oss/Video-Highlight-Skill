@@ -18,12 +18,12 @@ if _ENV_FILE.exists():
 
 def check_env():
     missing = []
-    for key in ["ARK_API_KEY", "LAS_API_KEY"]:
+    for key in ["ARK_HIGHLIGHT_API_KEY", "ARK_HIGHLIGHT_MODEL", "LAS_API_KEY"]:
         if not os.getenv(key):
             missing.append(key)
     if missing:
         logger.error("缺少环境变量: %s", ", ".join(missing))
-        logger.error("请设置: export ARK_API_KEY=xxx && export LAS_API_KEY=xxx")
+        logger.error("请设置 .env 文件中的必要变量: ARK_HIGHLIGHT_API_KEY, ARK_HIGHLIGHT_MODEL, LAS_API_KEY")
         return False
     logger.info("环境变量 OK")
     return True
