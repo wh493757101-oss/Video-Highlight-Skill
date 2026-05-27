@@ -173,28 +173,16 @@ class TestVideoEditorResolveVideoUrl:
         result = editor._resolve_video_url(url)
         assert result == url
 
-    def test_local_path_uploads(self, mocker, tmp_path):
+    def test_local_path_uses_tos_upload(self, mocker, tmp_path):
         video = tmp_path / "test.mp4"
         video.write_bytes(b"fake video content")
 
-        mock_client = mocker.MagicMock()
-        mock_client.upload_file.return_value = {"download_url": "https://ark-cn-beijing.volces.com/dl/abc"}
-        mocker.patch("src.ark_client.ArkClient", return_value=mock_client)
+        mock_put = mocker.patch("tos.TosClientV2.put_object_from_file")
 
         editor = VideoEditor()
         result = editor._resolve_video_url(str(video))
 
-        assert result == "https://ark-cn-beijing.volces.com/dl/abc"
-        mock_client.upload_file.assert_called_once_with(str(video))
-
-    def test_local_path_upload_no_url_raises(self, mocker, tmp_path):
-        video = tmp_path / "test.mp4"
-        video.write_bytes(b"fake video content")
-
-        mock_client = mocker.MagicMock()
-        mock_client.upload_file.return_value = {"id": "file-123"}
-        mocker.patch("src.ark_client.ArkClient", return_value=mock_client)
-
-        editor = VideoEditor()
-        with pytest.raises(RuntimeError, match="未返回 download_url"):
-            editor._resolve_video_url(str(video))
+        assert result.startswith("tos://")
+        assert "/input/test/" in result
+        assert result.endswith("/test.mp4")
+        mock_put.assert_called_once()

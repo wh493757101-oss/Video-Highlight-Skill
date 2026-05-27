@@ -73,13 +73,11 @@ class TestHighlightDetector:
         video_file = Path(metadata.path)
         video_file.write_bytes(b"fake mp4 content")
 
-        mock_upload_result = {"download_url": "https://ark-cn-beijing.volces.com/dl/test"}
         mock_chat_response = {
             "choices": [{"message": {"content": '{"segments": [{"start_time": 2.0, "end_time": 5.0, "label": "精彩动作", "score": 0.9, "reason": "画面变化剧烈"}]}'}}],
         }
 
         detector = HighlightDetector()
-        mocker.patch.object(detector.ark_client, "upload_file", return_value=mock_upload_result)
         mocker.patch.object(detector.ark_client, "chat", return_value=mock_chat_response)
 
         result = detector.detect(metadata, asr_text="测试语音文本")

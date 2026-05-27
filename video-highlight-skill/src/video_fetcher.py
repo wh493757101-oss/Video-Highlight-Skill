@@ -131,27 +131,23 @@ class TosSource:
         self.secret_key = secret_key or os.getenv("TOS_SECRET_KEY", "")
 
     def resolve(self) -> str:
-        if not self.endpoint or not self.access_key or not self.secret_key:
+        if not self.access_key or not self.secret_key:
             raise RuntimeError(
-                "TOS 配置不完整，请设置环境变量 TOS_ENDPOINT / TOS_ACCESS_KEY / TOS_SECRET_KEY "
+                "TOS 配置不完整，请设置环境变量 TOS_ACCESS_KEY / TOS_SECRET_KEY "
                 "或通过 TosSource 构造参数传入"
             )
         output_dir = Path(tempfile.mkdtemp(prefix="tos_dl_"))
         bucket, key = self._parse_tos_path()
         output_path = output_dir / Path(key).name
         try:
-            import boto3
-            from botocore.client import Config
-            s3 = boto3.client(
-                "s3",
-                endpoint_url=self.endpoint,
-                aws_access_key_id=self.access_key,
-                aws_secret_access_key=self.secret_key,
-                config=Config(signature_version="s3v4"),
+            import tos as _tos
+            _client = _tos.TosClientV2(
+                self.access_key, self.secret_key,
+                "tos-cn-guangzhou.volces.com", "cn-guangzhou",
             )
-            s3.download_file(bucket, key, str(output_path))
+            _client.get_object_to_file(bucket, key, str(output_path))
         except ImportError:
-            raise RuntimeError("TOS 下载需要 boto3，请执行: pip install boto3")
+            raise RuntimeError("TOS 下载需要 tos SDK，请执行: pip install tos")
         except Exception as e:
             raise RuntimeError(f"TOS 下载失败，请检查凭证和路径后重试: {e}") from e
         return str(output_path)
@@ -182,9 +178,9 @@ class ArkFileSource:
         if not self.path.exists():
             raise FileNotFoundError(f"视频文件不存在: {self.path}，请检查文件路径后重试")
 
-        from .ark_client import ArkClient
+        from .ark_client import ArkClient, ArkConfig
 
-        client = ArkClient()
+        client = ArkClient(ArkConfig(api_key=os.environ.get("ARK_HIGHLIGHT_API_KEY", "")))
         result = client.upload_file(str(self.path.absolute()))
         download_url = result.get("download_url", "")
         if not download_url:

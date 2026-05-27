@@ -6,13 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 from .evaluator import EvalReport, HighlightEvaluator, TestCaseLoader, compute_weighted_score
-
-_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
-if _ENV_FILE.exists():
-    load_dotenv(_ENV_FILE)
 from .llm_judge import JudgeReport, LLMJudge
 from .report import ReportConfig, ReportGenerator
 

@@ -194,9 +194,49 @@ def test_las_health():
         return False
 
 
+def test_ark_files_upload():
+    print("\n" + "=" * 60)
+    print("5. Ark Files API Upload (local → HTTPS URL)")
+    print("=" * 60)
+
+    import shutil
+    import subprocess
+    import tempfile
+
+    tmpdir = tempfile.mkdtemp(prefix="verify_upload_")
+    video_path = str(Path(tmpdir) / "test_upload.mp4")
+    try:
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=black:s=160x120:d=0.5",
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p", video_path],
+                check=True, capture_output=True, timeout=30,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            print(f"  [SKIP] Cannot create test video: {e}")
+            return True
+
+        from src.video_fetcher import ArkFileSource
+
+        try:
+            url = ArkFileSource(video_path).resolve()
+            if url.startswith("https://"):
+                print(f"  Upload OK: {url[:80]}...")
+                print(f"  [PASS] Ark Files API Upload OK")
+                return True
+            else:
+                print(f"  [FAIL] Unexpected URL format: {url}")
+                return False
+        except Exception as e:
+            print(f"  [FAIL] {e}")
+            return False
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_judge_chat():
     print("\n" + "=" * 60)
-    print("5. LLM Judge API (Qwen / DashScope)")
+    print("6. LLM Judge API (Qwen / DashScope)")
     print("=" * 60)
 
     cfg = JudgeConfig()
@@ -222,7 +262,7 @@ def test_judge_chat():
 
 def test_judge_scoring():
     print("\n" + "=" * 60)
-    print("6. LLM Judge full scoring (text-only)")
+    print("7. LLM Judge full scoring (text-only)")
     print("=" * 60)
 
     judge = LLMJudge()
@@ -269,6 +309,7 @@ def main():
     results["Highlight Multimodal (image)"] = test_highlight_multimodal()
     results["Highlight Video (native)"] = test_highlight_video()
     results["LAS API"] = test_las_health()
+    results["Ark Files Upload"] = test_ark_files_upload()
     results["Judge Chat"] = test_judge_chat()
     results["Judge Scoring"] = test_judge_scoring()
 

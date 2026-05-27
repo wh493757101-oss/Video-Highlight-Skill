@@ -167,7 +167,34 @@ class ReportGenerator:
             if self.config.save_charts:
                 self._save_charts(eval_report, judge_report, out_dir)
 
+            self._upload_to_tos(out_dir)
+
         return report_text
+
+    def _upload_to_tos(self, out_dir: Path) -> None:
+        import os as _os
+
+        _ak = _os.environ.get("TOS_ACCESS_KEY", "")
+        _sk = _os.environ.get("TOS_SECRET_KEY", "")
+        if not _ak or not _sk:
+            logger.warning("TOS 凭证未配置，跳过报告上传")
+            return
+
+        try:
+            import tos as _tos
+
+            _bucket = "arkclaw-tos-2124145136-cn-guangzhou"
+            _base_prefix = "arkclaw-tos-ci-yemqjzxa0w9t6r1y3a0v-lk0rj/video-highlight-bucket"
+            _folder = out_dir.name
+            _client = _tos.TosClientV2(_ak, _sk, "tos-cn-guangzhou.volces.com", "cn-guangzhou")
+
+            for _f in out_dir.iterdir():
+                if _f.is_file():
+                    _tos_key = f"{_base_prefix}/output/{_folder}/{_f.name}"
+                    _client.put_object_from_file(_bucket, _tos_key, str(_f))
+                    logger.info("报告已上传到 TOS: tos://%s/%s", _bucket, _tos_key)
+        except Exception as e:
+            logger.warning("TOS 报告上传失败: %s", e)
 
     def _build_json(self, eval_report: Any, judge_report: Any, weighted: dict[str, Any] | None = None) -> str:
         data: dict[str, Any] = {

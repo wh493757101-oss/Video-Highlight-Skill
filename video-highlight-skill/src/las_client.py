@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from dataclasses import dataclass, field
@@ -5,6 +6,8 @@ from enum import Enum
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStatus(str, Enum):
@@ -17,8 +20,10 @@ class TaskStatus(str, Enum):
 @dataclass
 class LasConfig:
     api_key: str = field(default_factory=lambda: os.getenv("LAS_API_KEY", ""))
-    base_url: str = "https://operator.las.cn-beijing.volces.com/api/v1"
-    poll_interval: float = 2.0
+    base_url: str = field(default_factory=lambda: os.getenv("LAS_BASE_URL", "https://operator.las.cn-guangzhou.volces.com/api/v1"))
+    operator_id: str = "las_video_edit"
+    operator_version: str = "v1"
+    poll_interval: float = 5.0
     poll_timeout: float = 600.0
     max_retries: int = 3
 
@@ -62,7 +67,8 @@ class LasClient:
                 resp.raise_for_status()
                 return resp.json()
             except httpx.HTTPStatusError as e:
-                last_error = f"HTTP {e.response.status_code}: {e.response.text}"
+                last_error = f"HTTP {e.response.status_code}: {e.response.text[:500]}"
+                logger.error("LAS submit failed: %s", last_error)
                 if e.response.status_code in (429, 500):
                     time.sleep(min(2 ** attempt, 30))
                     continue
@@ -80,7 +86,11 @@ class LasClient:
         resp = httpx.post(
             f"{self.config.base_url}/poll",
             headers=self._headers(),
-            json={"task_id": task_id},
+            json={
+                "task_id": task_id,
+                "operator_id": self.config.operator_id,
+                "operator_version": self.config.operator_version,
+            },
             timeout=30.0,
         )
         resp.raise_for_status()
@@ -90,11 +100,14 @@ class LasClient:
         deadline = time.time() + self.config.poll_timeout
         while time.time() < deadline:
             result = self.poll(task_id)
-            status = result.get("status", "")
-            if status == TaskStatus.SUCCESS:
+            meta = result.get("metadata", {})
+            status = meta.get("task_status", result.get("status", ""))
+            if status in ("COMPLETED", TaskStatus.SUCCESS):
                 return result
-            if status == TaskStatus.FAILED:
-                raise RuntimeError(f"LAS 任务失败: {result.get('error', '未知错误')}")
+            if status in ("FAILED", TaskStatus.FAILED, "TIMEOUT"):
+                raise RuntimeError(
+                    f"LAS 任务失败: code={meta.get('business_code', '?')} msg={meta.get('error_msg', '未知错误')}"
+                )
             time.sleep(self.config.poll_interval)
 
         raise TimeoutError(f"LAS 任务 {task_id} 超时（{self.config.poll_timeout}s）")

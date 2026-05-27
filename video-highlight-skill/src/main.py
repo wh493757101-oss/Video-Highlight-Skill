@@ -6,16 +6,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 from .highlight_detector import DetectorConfig, DetectionResult, HighlightDetector
-
-_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
-if _ENV_FILE.exists():
-    load_dotenv(_ENV_FILE)
 from .video_editor import EditResult, EditorConfig, VideoEditor
 from .video_fetcher import (
     LocalFileSource,
+    TosSource,
     UrlSource,
     VideoFetcher,
     VideoMetadata,
@@ -183,6 +178,15 @@ class VideoHighlightPipeline:
         skip_edit: bool = False,
     ) -> PipelineResult:
         return self.run(UrlSource(url), description, asr_text, skip_edit)
+
+    def run_from_tos(
+        self,
+        tos_path: str,
+        description: str = "",
+        asr_text: str = "",
+        skip_edit: bool = False,
+    ) -> PipelineResult:
+        return self.run(TosSource(tos_path), description, asr_text, skip_edit)
 
     def format_result(self, result: PipelineResult) -> str:
         lines: list[str] = []

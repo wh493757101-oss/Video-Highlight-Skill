@@ -81,27 +81,37 @@ class VideoEditor:
 
         video_url = self._resolve_video_url(video_path)
 
+        output_tos_path = self.config.output_tos_path or os.environ.get("TOS_OUTPUT_PATH", "")
         task_input: dict[str, Any] = {
             "video_url": video_url,
             "task_description": task_description,
-            "output_format": "mp4",
+            "output_tos_path": output_tos_path,
+            "mode": "detail",
         }
 
-        if self.config.output_tos_path:
-            task_input["output_tos_path"] = self.config.output_tos_path
+        logger.info("LAS submit: operator=%s, input keys=%s", self.config.las_operator_id, list(task_input.keys()))
 
         result = self.las_client.submit(
             self.config.las_operator_id,
             task_input,
             operator_version=self.config.las_operator_version,
         )
-        task_id = result.get("task_id", "")
+        task_id = result.get("metadata", {}).get("task_id", result.get("task_id", ""))
         if not task_id:
             raise RuntimeError("LAS 未返回 task_id")
 
         final = self.las_client.wait_for_completion(task_id)
-        output = final.get("output", {})
-        output_url = output.get("url", output.get("video_url", ""))
+        data = final.get("data", {})
+        output_url = final.get("output", {}).get("url", "")
+
+        if not output_url:
+            clips = data.get("clips", [])
+            valid_clips = [
+                c for c in clips
+                if c.get("clip_url") and c.get("file_size", 0) > 1024
+            ]
+            if valid_clips:
+                output_url = valid_clips[0]["clip_url"]
 
         seg_info = [
             {
@@ -121,20 +131,28 @@ class VideoEditor:
     def _resolve_video_url(self, video_path: str) -> str:
         """将本地视频路径转换为可公网访问的 URL。
 
-        如果已是 http/https URL 则直接返回；否则通过 Ark Files API 上传获取预签名 URL。
+        如果已是 http/https/tos URL 则直接返回；否则上传到 TOS 并返回 tos:// URL。
+        每个视频存放在独立的文件夹中: input/{filename}/video.mp4
         """
-        if video_path.startswith(("http://", "https://")):
+        if video_path.startswith(("http://", "https://", "tos://")):
             return video_path
 
-        from .ark_client import ArkClient
+        import os as _os
+        import tos as _tos
+        from pathlib import Path as _Path
 
-        client = ArkClient()
-        result = client.upload_file(video_path)
-        download_url = result.get("download_url", "")
-        if not download_url:
-            raise RuntimeError("Files API 未返回 download_url，LAS 剪辑无法继续，请稍后重试")
-        logger.info("本地视频已上传到 Files API，URL: %s", download_url[:80])
-        return download_url
+        _ak = _os.environ.get("TOS_ACCESS_KEY", "")
+        _sk = _os.environ.get("TOS_SECRET_KEY", "")
+        _bucket = "arkclaw-tos-2124145136-cn-guangzhou"
+        _base_prefix = "arkclaw-tos-ci-yemqjzxa0w9t6r1y3a0v-lk0rj/video-highlight-bucket"
+
+        _client = _tos.TosClientV2(_ak, _sk, "tos-cn-guangzhou.volces.com", "cn-guangzhou")
+        _filename = _Path(video_path).name
+        _folder = _Path(video_path).stem
+        _tos_key = f"{_base_prefix}/input/{_folder}/{_filename}"
+        _client.put_object_from_file(_bucket, _tos_key, video_path)
+        logger.info("视频已上传到 TOS: tos://%s/%s", _bucket, _tos_key)
+        return f"tos://{_bucket}/{_tos_key}"
 
     def _edit_with_ffmpeg(
         self,

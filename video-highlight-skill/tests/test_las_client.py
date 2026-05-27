@@ -7,9 +7,11 @@ class TestLasConfig:
     def test_default_config(self):
         config = LasConfig(api_key="test-key")
         assert config.api_key == "test-key"
-        assert config.poll_interval == 2.0
+        assert config.poll_interval == 5.0
         assert config.poll_timeout == 600.0
         assert config.max_retries == 3
+        assert config.operator_id == "las_video_edit"
+        assert config.operator_version == "v1"
 
     def test_custom_config(self):
         config = LasConfig(

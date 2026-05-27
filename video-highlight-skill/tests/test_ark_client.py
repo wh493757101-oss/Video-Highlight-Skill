@@ -207,10 +207,6 @@ class TestArkClientChatWithVideo:
         video = tmp_path / "test.mp4"
         video.write_bytes(b"fake video content")
 
-        mock_upload = mocker.patch.object(
-            ArkClient, "upload_file",
-            return_value={"download_url": "https://ark-cn-beijing.volces.com/dl/abc123"},
-        )
         mock_chat = mocker.patch.object(
             ArkClient, "chat",
             return_value={"choices": [{"message": {"content": "video analysis"}}]},
@@ -220,28 +216,14 @@ class TestArkClientChatWithVideo:
         result = client.chat_with_video("analyze this video", str(video))
 
         assert "choices" in result
-        mock_upload.assert_called_once_with(str(video))
         mock_chat.assert_called_once()
         call_args = mock_chat.call_args[1]
         messages = call_args["messages"]
         content = messages[0]["content"]
         assert content[0]["type"] == "video_url"
-        assert content[0]["video_url"]["url"] == "https://ark-cn-beijing.volces.com/dl/abc123"
+        assert content[0]["video_url"]["url"].startswith("data:video/mp4;base64,")
         assert content[1]["type"] == "text"
         assert content[1]["text"] == "analyze this video"
-
-    def test_chat_with_video_no_download_url(self, mocker, tmp_path):
-        video = tmp_path / "test.mp4"
-        video.write_bytes(b"fake video content")
-
-        mocker.patch.object(
-            ArkClient, "upload_file",
-            return_value={"id": "file-123"},
-        )
-
-        client = ArkClient(ArkConfig(api_key="test-key"))
-        with pytest.raises(RuntimeError, match="download_url"):
-            client.chat_with_video("prompt", str(video))
 
     def test_chat_with_video_file_not_found(self):
         client = ArkClient(ArkConfig(api_key="test-key"))

@@ -129,21 +129,20 @@ class ArkClient:
         max_tokens: int = 4096,
         response_format: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        file_obj = self.upload_file(video_path)
-        download_url: str = file_obj.get("download_url", "")
-        if not download_url:
-            raise RuntimeError(
-                "Files API 未返回 download_url，无法构建视频消息。"
-                f" 返回数据: {json.dumps(file_obj, ensure_ascii=False)[:200]}"
-            )
+        path = Path(video_path)
+        if not path.exists():
+            raise FileNotFoundError(f"视频文件不存在: {video_path}，请检查文件路径后重试")
 
+        with open(path, "rb") as f:
+            video_b64 = base64.b64encode(f.read()).decode()
+
+        video_url = f"data:video/mp4;base64,{video_b64}"
         content: list[dict[str, Any]] = [
-            {"type": "video_url", "video_url": {"url": download_url}},
+            {"type": "video_url", "video_url": {"url": video_url}},
             {"type": "text", "text": text},
         ]
-        messages = [{"role": "user", "content": content}]
         return self.chat(
-            messages=messages,
+            messages=[{"role": "user", "content": content}],
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
