@@ -1,11 +1,10 @@
 import subprocess
-import tempfile
 from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
-import subprocess
+import tempfile
 
 from src.video_fetcher import (
     ArkFileSource,
@@ -88,14 +87,16 @@ class TestTosSource:
             source._parse_tos_path()
 
     def test_resolve_success(self, mocker, tmp_path):
-        mock_boto = mocker.MagicMock()
-        mocker.patch.dict("sys.modules", {"boto3": mocker.MagicMock(), "botocore.client": mocker.MagicMock()})
         mocker.patch("tempfile.mkdtemp", return_value=str(tmp_path))
         mocker.patch.object(TosSource, "_parse_tos_path", return_value=("bucket", "key.mp4"))
+        mock_tos_client = mocker.patch("tos.TosClientV2")
+        mock_instance = mock_tos_client.return_value
+        mock_instance.get_object_to_file = mocker.MagicMock()
 
-        source = TosSource("tos://bucket/key.mp4", endpoint="http://tos.example.com", access_key="ak", secret_key="sk")
+        source = TosSource("tos://bucket/key.mp4", access_key="ak", secret_key="sk")
         result = source.resolve()
         assert result.endswith("key.mp4")
+        mock_instance.get_object_to_file.assert_called_once()
 
 
 class TestVideoFetcher:
@@ -116,11 +117,7 @@ class TestVideoFetcher:
         )
 
         mocker.patch("cv2.VideoCapture", return_value=mock_cap)
-        mocker.patch("cv2.imwrite")
         mocker.patch("src.video_fetcher._convert_to_mp4", return_value=str(video))
-        mock_extract = mocker.patch.object(
-            VideoFetcher, "_extract_audio", return_value="/tmp/out/audio/test.wav"
-        )
 
         fetcher = VideoFetcher(output_dir=str(tmp_path))
         meta = fetcher.fetch(LocalFileSource(str(video)))
@@ -129,8 +126,6 @@ class TestVideoFetcher:
         assert meta.fps == 30.0
         assert meta.width == 1920
         assert meta.height == 1080
-        assert meta.audio_path == "/tmp/out/audio/test.wav"
-        assert meta.frames_dir is not None
 
     def test_fetch_cannot_open_video(self, mocker, tmp_path):
         video = tmp_path / "bad.mp4"
@@ -149,55 +144,6 @@ class TestVideoFetcher:
         fetcher = VideoFetcher(output_dir=str(tmp_path))
         result = fetcher._convert_to_mp4("/tmp/input.mov")
         assert result.endswith(".mp4")
-
-    def test_extract_audio(self, mocker, tmp_path):
-        # probe returns "Audio:" in stderr to skip the probe guard
-        mock_probe = mocker.MagicMock()
-        mock_probe.stderr = b"Stream #0:1: Audio: aac"
-        mock_run = mocker.patch("subprocess.run", return_value=mock_probe)
-        fetcher = VideoFetcher(output_dir=str(tmp_path))
-        result = fetcher._extract_audio("/tmp/video.mp4")
-
-        assert result is not None
-        assert result.endswith(".wav")
-
-    def test_sample_keyframes(self, mocker, tmp_path):
-        mock_cap = mocker.MagicMock()
-        mock_cap.get.return_value = 10.0
-        mock_cap.read.side_effect = (
-            [(True, np.zeros((100, 100, 3), dtype=np.uint8))] * 50 + [(False, None)]
-        )
-        mocker.patch("cv2.VideoCapture", return_value=mock_cap)
-        mocker.patch("cv2.imwrite")
-
-        fetcher = VideoFetcher(output_dir=str(tmp_path))
-        result = fetcher._sample_keyframes("/tmp/video.mp4", interval=2.0)
-
-        assert result is not None
-        assert "frames" in result
-
-    def test_load_audio(self, mocker, tmp_path):
-        fake_audio = np.zeros(16000, dtype=np.float32)
-        mocker.patch("librosa.load", return_value=(fake_audio, 16000))
-
-        fetcher = VideoFetcher(output_dir=str(tmp_path))
-        y, sr = fetcher.load_audio("/tmp/audio.wav")
-
-        assert sr == 16000
-        assert len(y) == 16000
-
-    def test_load_frames(self, tmp_path):
-        frames_dir = tmp_path / "frames"
-        frames_dir.mkdir()
-        (frames_dir / "frame_000000.jpg").touch()
-        (frames_dir / "frame_000001.jpg").touch()
-        (frames_dir / "frame_000002.jpg").touch()
-
-        fetcher = VideoFetcher(output_dir=str(tmp_path))
-        frames = fetcher.load_frames(str(frames_dir))
-
-        assert len(frames) == 3
-        assert all(f.endswith(".jpg") for f in frames)
 
     def test_fetch_empty_file_raises(self, tmp_path):
         video = tmp_path / "empty.mp4"
@@ -225,30 +171,11 @@ class TestVideoFetcher:
         with pytest.raises(ValueError, match="无法解析视频参数|视频文件中无视频帧"):
             fetcher.fetch(LocalFileSource(str(video)))
 
-    def test_extract_audio_failure_returns_none(self, mocker, tmp_path):
-        mocker.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "ffmpeg", stderr="No audio stream"))
-        fetcher = VideoFetcher(output_dir=str(tmp_path))
-        result = fetcher._extract_audio("/tmp/video.mp4")
-        assert result is None
-
-    def test_extract_audio_timeout_returns_none(self, mocker, tmp_path):
-        mocker.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("ffmpeg", 120))
-        fetcher = VideoFetcher(output_dir=str(tmp_path))
-        result = fetcher._extract_audio("/tmp/video.mp4")
-        assert result is None
-
     def test_convert_to_mp4_failure_raises(self, mocker, tmp_path):
         mocker.patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, "ffmpeg", stderr="conversion error"))
         fetcher = VideoFetcher(output_dir=str(tmp_path))
         with pytest.raises(RuntimeError, match="视频转码失败"):
             fetcher._convert_to_mp4("/tmp/input.mov")
-
-    def test_load_audio_failure_returns_empty(self, mocker, tmp_path):
-        mocker.patch("librosa.load", side_effect=RuntimeError("corrupt audio"))
-        fetcher = VideoFetcher(output_dir=str(tmp_path))
-        y, sr = fetcher.load_audio("/tmp/bad.wav")
-        assert len(y) == 0
-        assert sr == 22050
 
 
 class TestArkFileSource:

@@ -3,14 +3,11 @@ import os
 import shutil
 import subprocess
 import tempfile
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 import cv2
-import librosa
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +68,6 @@ class VideoMetadata:
     fps: float
     width: int
     height: int
-    audio_path: str | None = None
-    frames_dir: str | None = None
 
 
 class VideoSource(Protocol):
@@ -115,7 +110,6 @@ class UrlSource:
             err_msg = _decode_stderr(e)[:500]
             raise RuntimeError(f"视频下载失败，请检查链接是否有效后重试: {err_msg}") from e
 
-        # yt-dlp 下载的视频可能无音频流（如 B 站 av1 格式），后续 _extract_audio 会降级处理
         files = list(output_dir.glob("*"))
         if not files:
             raise RuntimeError("下载完成但未找到输出文件，请稍后重试")
@@ -167,8 +161,7 @@ class TosSource:
 class ArkFileSource:
     """通过 Ark Files API 上传本地文件并获取 HTTPS 预签名下载链接。
 
-    只需 ARK_API_KEY，无需 TOS 凭证。返回的 download_url 24 小时有效，
-    可直接作为 LAS las_video_edit 算子的输入 URL。
+    只需 ARK_API_KEY，无需 TOS 凭证。返回的 download_url 24 小时有效。
     """
 
     def __init__(self, path: str):
@@ -292,117 +285,13 @@ class VideoFetcher:
                 duration = frame_count / fps if fps > 0 else duration
                 cap2.release()
 
-        # 提取音频
-        audio_path = self._extract_audio(video_path)
-
-        # 关键帧采样
-        frames_dir = self._sample_keyframes(video_path)
-
         return VideoMetadata(
             path=video_path,
             duration=duration,
             fps=fps,
             width=width,
             height=height,
-            audio_path=audio_path,
-            frames_dir=frames_dir,
         )
 
     def _convert_to_mp4(self, src: str) -> str:
         return _convert_to_mp4(src, self.output_dir)
-
-    def _extract_audio(self, video_path: str) -> str | None:
-        audio_dir = self.output_dir / "audio"
-        audio_dir.mkdir(parents=True, exist_ok=True)
-        safe_stem = Path(video_path).stem
-        audio_path = str(audio_dir / f"{safe_stem}.wav")
-
-        # 先检查是否有音频流，无音频流直接跳过
-        probe_cmd = [
-            _get_ffmpeg(), "-i", video_path,
-            "-hide_banner", "-f", "null", "-",
-        ]
-        try:
-            probe = subprocess.run(
-                probe_cmd, capture_output=True, timeout=30,
-                env=_subprocess_env(),
-            )
-            stderr_text = probe.stderr.decode("utf-8", errors="replace") if isinstance(probe.stderr, bytes) else (probe.stderr or "")
-            if "Audio:" not in stderr_text:
-                logger.info("视频无音频流，跳过音频提取")
-                return None
-        except (subprocess.SubprocessError, OSError):
-            pass
-
-        cmd = [
-            _get_ffmpeg(), "-y",
-            "-i", video_path,
-            "-vn",
-            "-acodec", "pcm_s16le",
-            "-ar", "16000",
-            "-ac", "1",
-            audio_path,
-        ]
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=120,
-                           env=_subprocess_env())
-            return audio_path
-        except subprocess.TimeoutExpired:
-            logger.warning("音频提取超时，继续无音频处理")
-            return None
-        except subprocess.CalledProcessError as e:
-            logger.warning("音频提取失败（可能无音频流），继续无音频处理: %s", _decode_stderr(e))
-            return None
-
-    def _sample_keyframes(self, video_path: str, interval: float = 2.0) -> str:
-        # 使用纯 ASCII 目录名避免 Windows 上 cv2.imwrite 的 Unicode 路径问题
-        safe_name = uuid.uuid4().hex[:12]
-        frames_dir = self.output_dir / "frames" / safe_name
-        frames_dir.mkdir(parents=True, exist_ok=True)
-
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            logger.warning("无法打开视频进行关键帧采样: %s", video_path)
-            return str(frames_dir)
-
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0:
-            logger.warning("无法获取视频帧率，使用默认 30fps")
-            fps = 30.0
-        frame_interval = max(1, int(fps * interval))
-
-        idx = 0
-        saved = 0
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                if idx % frame_interval == 0:
-                    frame_path = str(frames_dir / f"frame_{saved:06d}.jpg")
-                    ok, buf = cv2.imencode(".jpg", frame)
-                    if ok:
-                        with open(frame_path, "wb") as f:
-                            f.write(buf.tobytes())
-                        saved += 1
-                    else:
-                        logger.warning("关键帧编码失败: 第 %d 帧", idx)
-                idx += 1
-        finally:
-            cap.release()
-
-        if saved == 0:
-            logger.warning("关键帧采样结果为空: %s", video_path)
-        return str(frames_dir)
-
-    def load_audio(self, audio_path: str) -> tuple[np.ndarray, int]:
-        try:
-            y, sr = librosa.load(audio_path, sr=None)
-            return y, sr
-        except Exception as e:
-            logger.warning("音频加载失败: %s", e)
-            return np.array([]), 22050
-
-    def load_frames(self, frames_dir: str) -> list[str]:
-        frame_files = sorted(Path(frames_dir).glob("*.jpg"))
-        return [str(f) for f in frame_files]

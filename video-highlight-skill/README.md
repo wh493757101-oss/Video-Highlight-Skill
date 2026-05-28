@@ -37,8 +37,8 @@
 ## 安装
 
 ```bash
-git clone https://github.com/wh493757101-oss/LAS-SKILL.git
-cd LAS-SKILL
+git clone https://github.com/wh493757101-oss/Video-Highlight-Skill.git
+cd Video-Highlight-Skill
 pip install -e ".[dev]"
 ```
 

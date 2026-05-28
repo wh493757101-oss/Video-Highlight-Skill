@@ -103,7 +103,7 @@
 | **Kendall's τ / Spearman's ρ** | ✓ (TVSum 标配) | ✗ | **缺失**：排序质量指标，适合评测 saliency score 的排序能力 |
 | **跨类别/跨难度分组** | ✓ (per-category) | ✓ | 一致 |
 | **多标注者一致性** | ✓ (QVHighlights 3 标注者取平均) | ✗ | 我们的 GT 是单人标注，缺少标注质量验证 |
-| **Ablation Study** | ✓ (标配) | ✗ | **缺失**：无法量化各模块（多模态/规则引擎/后处理）的贡献 |
+| **Ablation Study** | ✓ (标配) | ✗ | **缺失**：无法量化各模块的贡献 |
 | **跨数据集泛化** | ✓ | ✗ | 受限于自建数据集 |
 | **效率指标** | GFLOPs, 推理时间 | Token 效率 | 可补充推理时间 |
 | **CLIP 语义评分** | 新兴方向 | ✗ | 可选：用 CLIP 评估预测片段与 instruction 的语义匹配度 |
@@ -137,7 +137,7 @@ Avg mAP  — [0.5:0.05:0.95] 平均
 #### (3) Ablation 对比框架
 
 评测框架支持对比不同配置：
-- Full pipeline vs 纯多模态（无降级）
+- Full pipeline vs 仅 FFmpeg 降级
 - Full pipeline vs 纯规则引擎
 - 有 ASR vs 无 ASR
 - 有后处理 vs 无后处理

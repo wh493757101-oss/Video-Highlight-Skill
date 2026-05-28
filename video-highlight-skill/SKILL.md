@@ -84,8 +84,7 @@ metadata:
 - TOS 路径：确认凭证有效，路径格式为 `tos://bucket/key`
 
 **输出路径检查：**
-- LAS 剪辑时 `output_tos_path` 必须为 `tos://` 前缀的目录（不能以文件名结尾）
-- LAS Region 必须与 TOS Bucket 区域一致
+- 输出视频为本地 mp4 文件，无需 TOS 上传
 
 ### Step 1: 视频获取与预处理
 
