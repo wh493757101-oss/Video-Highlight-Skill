@@ -1,27 +1,23 @@
-import subprocess
 from pathlib import Path
 
 import pytest
 
-from src.rule_engine import HighlightSegment
 from src.video_editor import EditResult, EditorConfig, VideoEditor
 
 
 class TestEditorConfig:
     def test_defaults(self):
         cfg = EditorConfig()
-        assert cfg.las_operator_id == "las_video_edit"
-        assert cfg.transition_duration == 0.5
-        assert cfg.fallback_enabled is True
+        assert cfg.output_dir == ""
+        assert cfg.concat_list_filename == "concat_list.txt"
 
     def test_custom(self):
         cfg = EditorConfig(
             output_dir="/tmp/out",
-            transition_duration=1.0,
-            fallback_enabled=False,
+            concat_list_filename="my_list.txt",
         )
         assert cfg.output_dir == "/tmp/out"
-        assert cfg.fallback_enabled is False
+        assert cfg.concat_list_filename == "my_list.txt"
 
 
 class TestEditResult:
@@ -29,160 +25,62 @@ class TestEditResult:
         result = EditResult(output_path="/tmp/out.mp4")
         assert result.output_path == "/tmp/out.mp4"
         assert result.segments == []
-        assert result.source == "ffmpeg"
+        assert result.source == "multimodal"
 
     def test_with_segments(self):
         seg_info = [{"start_time": 1.0, "end_time": 3.0, "score": 0.9}]
         result = EditResult(
             output_path="/tmp/out.mp4",
             segments=seg_info,
-            source="las",
+            source="multimodal",
         )
-        assert result.source == "las"
+        assert result.source == "multimodal"
         assert len(result.segments) == 1
 
 
-class TestVideoEditor:
-    def _make_segments(self):
-        return [
-            HighlightSegment(start_time=0.0, end_time=3.0, combined_score=0.9),
-            HighlightSegment(start_time=5.0, end_time=8.0, combined_score=0.7),
+class TestVideoEditorFFmpeg:
+    def test_edit_with_ffmpeg_success(self, mocker, tmp_path):
+        mock_run = mocker.patch("subprocess.run")
+        editor = VideoEditor(EditorConfig(output_dir=str(tmp_path)))
+
+        segments = [
+            {"start_time": 0.0, "end_time": 5.0, "score": 0.9},
+            {"start_time": 10.0, "end_time": 15.0, "score": 0.7},
         ]
 
-    def test_edit_with_las_success(self, mocker, monkeypatch):
-        monkeypatch.setenv("LAS_API_KEY", "test-key")
+        result = editor.edit_with_ffmpeg("/tmp/video.mp4", segments)
 
-        segments = self._make_segments()
-
-        mock_submit = mocker.patch.object(
-            VideoEditor, "_edit_with_las",
-            return_value=EditResult(
-                output_path="https://las.output/highlight.mp4",
-                segments=[{"start_time": 0.0, "end_time": 3.0, "score": 0.9}],
-                source="las",
-            ),
-        )
-
-        editor = VideoEditor()
-        result = editor.edit("/tmp/video.mp4", segments, "剪辑精彩片段")
-
-        assert result.source == "las"
-        assert result.output_path == "https://las.output/highlight.mp4"
-        mock_submit.assert_called_once()
-
-    def test_edit_fallback_to_ffmpeg(self, mocker, tmp_path):
-        segments = self._make_segments()
-
-        mocker.patch.object(
-            VideoEditor, "_edit_with_las",
-            side_effect=RuntimeError("LAS 不可用"),
-        )
-
-        mock_ffmpeg = mocker.patch.object(
-            VideoEditor, "_edit_with_ffmpeg",
-            return_value=EditResult(
-                output_path=str(tmp_path / "highlight_reel.mp4"),
-                source="ffmpeg",
-            ),
-        )
-
-        editor = VideoEditor()
-        result = editor.edit("/tmp/video.mp4", segments)
-
-        assert result.source == "ffmpeg"
-        mock_ffmpeg.assert_called_once()
-
-    def test_edit_fallback_disabled(self, mocker):
-        segments = self._make_segments()
-
-        mocker.patch.object(
-            VideoEditor, "_edit_with_las",
-            side_effect=RuntimeError("LAS 不可用"),
-        )
-
-        editor = VideoEditor(EditorConfig(fallback_enabled=False))
-        with pytest.raises(RuntimeError, match="LAS 不可用"):
-            editor.edit("/tmp/video.mp4", segments)
-
-    def test_edit_with_ffmpeg(self, mocker, tmp_path):
-        mock_run = mocker.patch("subprocess.run")
-        mocker.patch(
-            "tempfile.mkdtemp", return_value=str(tmp_path / "ve_out")
-        )
-
-        segments = self._make_segments()
-
-        editor = VideoEditor(EditorConfig(output_dir=str(tmp_path)))
-        result = editor._edit_with_ffmpeg("/tmp/video.mp4", segments)
-
-        assert result.source == "ffmpeg"
-        assert "highlight_reel.mp4" in result.output_path
+        assert result.source == "multimodal"
         assert len(result.segments) == 2
-        assert mock_run.call_count >= 3
+        assert result.output_path.startswith(str(tmp_path))
+        assert "highlight_reel_" in result.output_path
+        assert mock_run.call_count >= 3  # 2 cuts + 1 concat
 
-    def test_build_las_description(self):
-        segments = self._make_segments()
+    def test_edit_with_ffmpeg_empty_segments_raises(self):
         editor = VideoEditor()
+        with pytest.raises(ValueError, match="segments 为空"):
+            editor.edit_with_ffmpeg("/tmp/video.mp4", [])
 
-        desc = editor._build_las_description(segments, "剪辑精彩片段")
-        assert "用户需求: 剪辑精彩片段" in desc
-        assert "片段1: 0.0s - 3.0s" in desc
-        assert "片段2: 5.0s - 8.0s" in desc
-        assert "0.5s 转场" in desc
+    def test_edit_with_ffmpeg_single_segment(self, mocker, tmp_path):
+        mock_run = mocker.patch("subprocess.run")
+        editor = VideoEditor(EditorConfig(output_dir=str(tmp_path)))
 
-    def test_build_las_description_no_user_input(self):
-        segments = self._make_segments()
-        editor = VideoEditor()
+        segments = [{"start_time": 5.0, "end_time": 10.0, "score": 0.8}]
 
-        desc = editor._build_las_description(segments, "")
-        assert "用户需求" not in desc
-        assert "片段1: 0.0s - 3.0s" in desc
+        result = editor.edit_with_ffmpeg("/tmp/video.mp4", segments)
 
-    def test_las_submit_no_task_id(self, mocker, monkeypatch):
-        monkeypatch.setenv("LAS_API_KEY", "test-key")
-        segments = self._make_segments()
+        assert result.source == "multimodal"
+        assert len(result.segments) == 1
+        assert mock_run.call_count >= 2  # 1 cut + 1 concat
 
-        mock_resp = mocker.MagicMock()
-        mock_resp.json.return_value = {"status": "submitted"}
-        mock_resp.raise_for_status = mocker.MagicMock()
-        mocker.patch("httpx.post", return_value=mock_resp)
+    def test_edit_with_ffmpeg_cleanup_temp_files(self, mocker, tmp_path):
+        mock_run = mocker.patch("subprocess.run")
+        editor = VideoEditor(EditorConfig(output_dir=str(tmp_path)))
 
-        editor = VideoEditor()
-        with pytest.raises(RuntimeError, match="LAS 未返回 task_id"):
-            editor._edit_with_las("https://example.com/video.mp4", segments, "")
+        segments = [{"start_time": 0.0, "end_time": 3.0, "score": 0.9}]
 
-    def test_las_client_lazy_init(self, monkeypatch):
-        monkeypatch.setenv("LAS_API_KEY", "test-key")
-        editor = VideoEditor()
-        assert editor._las_client is None
-        client = editor.las_client
-        assert client is not None
-        assert editor._las_client is not None
+        editor.edit_with_ffmpeg("/tmp/video.mp4", segments)
 
-
-class TestVideoEditorResolveVideoUrl:
-    def test_url_passthrough(self):
-        editor = VideoEditor()
-        url = "https://example.com/video.mp4"
-        result = editor._resolve_video_url(url)
-        assert result == url
-
-    def test_http_url_passthrough(self):
-        editor = VideoEditor()
-        url = "http://example.com/video.mp4"
-        result = editor._resolve_video_url(url)
-        assert result == url
-
-    def test_local_path_uses_tos_upload(self, mocker, tmp_path):
-        video = tmp_path / "test.mp4"
-        video.write_bytes(b"fake video content")
-
-        mock_put = mocker.patch("tos.TosClientV2.put_object_from_file")
-
-        editor = VideoEditor()
-        result = editor._resolve_video_url(str(video))
-
-        assert result.startswith("tos://")
-        assert "/input/test/" in result
-        assert result.endswith("/test.mp4")
-        mock_put.assert_called_once()
+        # Temp clip files should be cleaned up
+        clip_files = list(Path(tmp_path).glob("_clip_*.mp4"))
+        assert len(clip_files) == 0

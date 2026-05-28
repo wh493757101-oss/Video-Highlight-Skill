@@ -1,4 +1,4 @@
-"""端到端验证脚本 — 测试完整 Pipeline：视频获取 → 高光检测 → LAS 剪辑 → 评测"""
+"""端到端验证脚本 — 测试完整 Pipeline：视频获取 → 多模态识别 → FFmpeg 拼接 → 评测"""
 import os
 import sys
 import logging
@@ -18,40 +18,23 @@ if _ENV_FILE.exists():
 
 def check_env():
     missing = []
-    for key in ["ARK_HIGHLIGHT_API_KEY", "ARK_HIGHLIGHT_MODEL", "LAS_API_KEY"]:
+    for key in ["ARK_HIGHLIGHT_API_KEY"]:
         if not os.getenv(key):
             missing.append(key)
     if missing:
         logger.error("缺少环境变量: %s", ", ".join(missing))
-        logger.error("请设置 .env 文件中的必要变量: ARK_HIGHLIGHT_API_KEY, ARK_HIGHLIGHT_MODEL, LAS_API_KEY")
+        logger.error("请设置 .env 文件中的必要变量: ARK_HIGHLIGHT_API_KEY")
         return False
     logger.info("环境变量 OK")
     return True
 
 
-def check_ffmpeg():
-    import subprocess
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-version"], capture_output=True, text=True, timeout=10
-        )
-        if result.returncode == 0:
-            logger.info("FFmpeg OK: %s", result.stdout.split("\n")[0])
-            return True
-    except FileNotFoundError:
-        pass
-    except Exception:
-        pass
-    logger.error("FFmpeg 不可用，请安装并加入 PATH")
-    return False
-
-
-def verify_detection(video_path: str):
+def verify_fetch(video_path: str):
     from src.main import VideoHighlightPipeline, PipelineConfig
     from src.video_fetcher import LocalFileSource
 
     logger.info("=" * 60)
-    logger.info("Step 1: 高光检测验证（skip_edit=True）")
+    logger.info("Step 1: 视频预处理验证（skip_edit=True）")
     logger.info("=" * 60)
 
     pipeline = VideoHighlightPipeline(PipelineConfig(output_dir="./output"))
@@ -62,18 +45,12 @@ def verify_detection(video_path: str):
     )
 
     if result.error:
-        logger.error("检测失败: %s", result.error)
+        logger.error("预处理失败: %s", result.error)
         return None
 
     logger.info("视频时长: %.1fs", result.metadata.duration)
-    logger.info("检测方式: %s", result.detection.source)
-    logger.info("高光片段数: %d", len(result.detection.segments))
-
-    for i, seg in enumerate(result.detection.segments):
-        logger.info(
-            "  #%d: %.1fs - %.1fs (%.2f)",
-            i + 1, seg.start_time, seg.end_time, seg.combined_score,
-        )
+    logger.info("分辨率: %dx%d", result.metadata.width, result.metadata.height)
+    logger.info("帧率: %.1f fps", result.metadata.fps)
 
     return result
 
@@ -83,7 +60,7 @@ def verify_editing(video_path: str):
     from src.video_fetcher import LocalFileSource
 
     logger.info("=" * 60)
-    logger.info("Step 2: 完整 Pipeline 验证（含 LAS 剪辑）")
+    logger.info("Step 2: 完整 Pipeline 验证（多模态识别 + FFmpeg 拼接）")
     logger.info("=" * 60)
 
     output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "output")
@@ -98,8 +75,12 @@ def verify_editing(video_path: str):
         logger.error("Pipeline 失败: %s", result.error)
         return None
 
-    logger.info("剪辑方式: %s", result.edit.source if result.edit else "N/A")
+    logger.info("识别方式: %s", result.edit.source if result.edit else "N/A")
     logger.info("输出路径: %s", result.edit.output_path if result.edit else "N/A")
+    if result.edit and result.edit.segments:
+        for i, seg in enumerate(result.edit.segments):
+            logger.info("  #%d: %.1fs - %.1fs (score=%.2f)",
+                        i + 1, seg["start_time"], seg["end_time"], seg.get("score", 0))
     logger.info("JSON 导出:\n%s", pipeline.export_json(result))
     return result
 
@@ -131,10 +112,10 @@ def verify_evaluation():
     )
 
     judge_report = JudgeReport(
-        scores=[JudgeScore(rhythm=4.0, completeness=4.0, excitement=5.0,
-                           instruction_fit=4.0, overall_comment="测试通过")],
-        overall_rhythm=4.0, overall_completeness=4.0, overall_excitement=5.0,
-        overall_instruction_fit=4.0, overall_average=4.25,
+        scores=[JudgeScore(rhythm=4.0, transition_quality=4.0, audiovisual_sync=5.0,
+                           completeness=4.0, instruction_fit=4.0, overall_comment="测试通过")],
+        overall_rhythm=4.0, overall_transition_quality=4.0, overall_audiovisual_sync=5.0,
+        overall_completeness=4.0, overall_instruction_fit=4.0, overall_average=4.2,
     )
 
     weighted = compute_weighted_score(eval_report, judge_report)
@@ -169,15 +150,12 @@ def main():
     if not check_env():
         sys.exit(1)
 
-    if not check_ffmpeg():
-        sys.exit(1)
-
-    result = verify_detection(video_path)
+    result = verify_fetch(video_path)
     if result is None:
         sys.exit(1)
 
     if detect_only:
-        logger.info("仅检测模式，跳过剪辑和评测")
+        logger.info("仅预处理模式，跳过剪辑和评测")
         return
 
     result = verify_editing(video_path)

@@ -12,6 +12,22 @@ from .report import ReportConfig, ReportGenerator
 
 logger = logging.getLogger(__name__)
 
+CATEGORY_HIGHLIGHT_DEFAULTS: dict[str, str] = {
+    "体育": "得分瞬间、关键传球、精彩扑救、庆祝时刻、红黄牌",
+    "sports": "得分瞬间、关键传球、精彩扑救、庆祝时刻",
+    "游戏": "击杀、团战、翻盘、精彩操作、获胜时刻",
+    "gaming": "击杀、团战、翻盘、精彩操作、获胜时刻",
+    "新闻": "关键人物发言、新闻重点事件、现场画面",
+    "news": "关键人物发言、新闻重点事件、现场画面",
+    "vlog": "有趣互动、风景特写、情绪高光、转折事件",
+    "娱乐": "笑点、才艺展示、高能互动、名场面",
+    "entertainment": "笑点、才艺展示、高能互动、名场面",
+    "教育": "核心知识点、操作演示、总结要点",
+    "education": "核心知识点、操作演示、总结要点",
+    "户外": "精彩瞬间、风景亮点、活动高潮",
+    "outdoor": "精彩瞬间、风景亮点、活动高潮",
+}
+
 
 @dataclass
 class EvalRunConfig:
@@ -19,7 +35,7 @@ class EvalRunConfig:
     output_dir: str = ""
     iou_threshold: float = 0.5
     skip_llm_judge: bool = False
-    skip_edit: bool = True
+    skip_edit: bool = False
     case_filter: list[str] = field(default_factory=list)
     judge_weight: float = 0.5
     judge_max_retries: int = 3
@@ -126,19 +142,38 @@ class EvalRunner:
         _, peak_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
 
-        predicted = [
-            {
-                "start_time": seg.start_time,
-                "end_time": seg.end_time,
-                "score": seg.combined_score,
-            }
-            for seg in result.detection.segments
-        ]
+        if result.edit and result.edit.segments:
+            predicted = [
+                {
+                    "start_time": seg["start_time"],
+                    "end_time": seg["end_time"],
+                    "score": seg.get("score", 0.5),
+                }
+                for seg in result.edit.segments
+            ]
+            judge_segments = [
+                {
+                    "start_time": seg["start_time"],
+                    "end_time": seg["end_time"],
+                    "score": seg.get("score", 0.5),
+                    "label": seg.get("label", ""),
+                    "clip_url": seg.get("clip_url", ""),
+                }
+                for seg in result.edit.segments
+            ]
 
-        usage: dict[str, Any] = {}
-        if result.detection.raw_response:
-            raw = result.detection.raw_response
-            usage = raw.get("usage", {})
+        # 收集 token 用量（从 detector 获取）
+        pipeline.detector  # ensure initialized
+        detector = pipeline._detector
+        usage = {}
+        if detector:
+            usage = {
+                "api_calls": detector.call_count,
+                "api_retries": detector.retry_count,
+            }
+
+        # 收集阶段耗时
+        timing = result.timing.to_dict() if result.timing else {}
 
         return {
             "case_id": case["case_id"],
@@ -149,14 +184,18 @@ class EvalRunner:
             "ground_truth": case["ground_truth"],
             "target": description,
             "style": instruction.get("style", ""),
+            "core_highlight_definition": instruction.get("core_highlight_definition", ""),
             "usage": usage,
             "video_duration": result.metadata.duration,
             "elapsed_time": result.elapsed_time,
-            "degraded": result.detection.degraded,
-            "api_calls": pipeline.detector.call_count,
-            "api_retries": pipeline.detector.retry_count,
+            "api_calls": usage.get("api_calls", 1),
+            "api_retries": usage.get("api_retries", 0),
             "memory_peak_mb": peak_bytes / (1024 * 1024),
             "memory_avg_mb": 0.0,
+            "edit_output_path": result.edit.output_path if result.edit else "",
+            "judge_segments": judge_segments if result.edit and result.edit.segments else [],
+            "timing": timing,
+            "estimated_cost_yuan": result.estimated_cost_yuan,
         }
 
     def _run_concurrent(self, cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -210,16 +249,24 @@ class EvalRunner:
 
         return results
 
+    def _default_highlight_definition(self, category: str) -> str:
+        return CATEGORY_HIGHLIGHT_DEFAULTS.get(
+            category, "视频中最重要的高光时刻和关键场景"
+        )
+
     def _build_judge_cases(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         judge_cases: list[dict[str, Any]] = []
         for r in results:
             if not r.get("predicted"):
                 continue
+            category = r.get("category", "")
+            core_def = r.get("core_highlight_definition", "") or self._default_highlight_definition(category)
             judge_cases.append({
-                "category": r.get("category", ""),
+                "category": category,
                 "target": r.get("target", ""),
                 "style": r.get("style", ""),
-                "segments": r["predicted"],
-                "video_path": r.get("video_path", ""),
+                "core_highlight_definition": core_def,
+                "segments": r.get("judge_segments", r["predicted"]),
+                "video_path": r.get("edit_output_path", ""),
             })
         return judge_cases
