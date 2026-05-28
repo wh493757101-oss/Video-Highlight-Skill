@@ -121,7 +121,7 @@ video-highlight-skill/
 ├── scripts/
 │   ├── verify_e2e.py           # 端到端验证脚本
 │   ├── verify_e2e_strict.py    # 严格端到端验证
-│   └── verify_dual_path.py     # API 连通性验证
+│   ├── verify_connectivity.py   # API 连通性验证
 └── tests/
     └── test_*.py
 ```

@@ -74,7 +74,7 @@ metadata:
 ### Step 0: 前置检查
 
 **环境变量检查：**
-- 确认 `LAS_API_KEY` 已配置
+- 确认 `ARK_HIGHLIGHT_API_KEY` 已配置
 - 如输入为本地文件或 TOS 路径，确认 `TOS_ACCESS_KEY` / `TOS_SECRET_KEY` 已配置
 - 缺失时必须向用户索要
 
